@@ -635,7 +635,7 @@ function renderUploadBox() {
         </div>
         <div class="upload-row" style="margin-top:10px;">
           <button class="btn btn-danger" data-action="cancel-staged-upload" ${state.busyUpload ? "disabled" : ""}>🗑 Remove</button>
-          <button class="btn btn-dark" data-action="submit-staged-upload" ${state.busyUpload ? "disabled" : ""}>${state.busyUpload ? "Submitting…" : "✅ Submit to folder"}</button>
+          <button class="btn btn-dark" data-action="submit-staged-upload" ${state.busyUpload ? "disabled" : ""}>${state.busyUpload ? "Submitting…" : "✅ Submit"}</button>
         </div>
       </div>
     `;
