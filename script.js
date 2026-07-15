@@ -894,7 +894,7 @@ document.addEventListener("DOMContentLoaded", () => {
         state.modal = null;
         return render();
       } else {
-        if (pin !== state.data.adminPin) { state.modal.error = "Incorrect PIN."; return render(); }
+        if (pin !== String(state.data.adminPin)) { state.modal.error = "Incorrect PIN."; return render(); }
         state.adminMode = true;
         state.modal = null;
         return render();
@@ -905,7 +905,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const oldPin = document.getElementById("cp-old").value.replace(/\D/g, "").slice(0, 8);
       const newPin = document.getElementById("cp-new").value.replace(/\D/g, "").slice(0, 8);
       const confirmPin = document.getElementById("cp-confirm").value.replace(/\D/g, "").slice(0, 8);
-      if (oldPin !== state.data.adminPin) { state.modal.error = "Current PIN is incorrect."; return render(); }
+      if (oldPin !== String(state.data.adminPin)) { state.modal.error = "Current PIN is incorrect."; return render(); }
       if (newPin.length < 4) { state.modal.error = "New PIN must be at least 4 digits."; return render(); }
       if (newPin !== confirmPin) { state.modal.error = "New PINs don't match."; return render(); }
       state.modal = null;
