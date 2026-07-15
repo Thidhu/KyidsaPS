@@ -3,7 +3,7 @@
 const BACKEND_URL = "https://script.google.com/macros/s/AKfycbxNO55TNKEu2y1UFVUkz1tT5XE8_W-0muIJyv7kLCSjjIPypMQTF2Cg96WwO-yBFxWrDg/exec";
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-const CATEGORY_LABEL = { lessonPlan: "Lesson Plan", otherDocuments: "Other Documents" };
+const CATEGORY_LABEL = { lessonPlan: "Lesson Plan", otherDocuments: "Other Document" };
 
 function emptyData() {
   return {
@@ -31,6 +31,7 @@ const state = {
   saveError: "",
   today: new Date(),
   busyUpload: false,
+  pendingUpload: null, // { category, docName, fileName, mimeType, dataUrl } — staged, not yet submitted
 };
 
 // ---------- Utils ----------
@@ -558,29 +559,63 @@ function renderFolder(teacher) {
       ${statuses.map(({ cat, status }) => `<div><span class="label">${CATEGORY_LABEL[cat]}:</span>${statusPillHtml(status)}</div>`).join("")}
     </div>
 
-    ${canUpload ? `
-      <div class="upload-box">
-        <div class="title">Upload a document</div>
-        <div class="upload-row">
-          <div class="upload-field">
-            <label>Category</label>
-            <select id="upload-category">
-              <option value="lessonPlan">Lesson Plan</option>
-              <option value="otherDocuments">Other Documents</option>
-            </select>
-          </div>
-          <div class="upload-field" id="doc-name-field" style="display:none;">
-            <label>Document name</label>
-            <input type="text" id="upload-doc-name" placeholder="e.g. Term 2 Attendance Sheet" />
-          </div>
-          <button class="btn btn-dark" id="choose-file-btn" ${state.busyUpload ? "disabled" : ""}>📤 ${state.busyUpload ? "Uploading…" : "Choose File"}</button>
-          <input type="file" id="upload-file-input" style="display:none;" />
-        </div>
-      </div>
-    ` : ""}
+    ${canUpload ? renderUploadBox() : ""}
 
     ${docSectionHtml("Lesson Plans", lessonPlans, isPrincipal, false)}
     ${docSectionHtml("Other Documents", otherDocs, isPrincipal, true)}
+  `;
+}
+
+function renderUploadBox() {
+  const p = state.pendingUpload;
+
+  if (p) {
+    return `
+      <div class="upload-box">
+        <div class="title">Review before submitting</div>
+        <div class="upload-row">
+          <div class="upload-field">
+            <label>Category</label>
+            <select id="staged-category" ${state.busyUpload ? "disabled" : ""}>
+              <option value="lessonPlan" ${p.category === "lessonPlan" ? "selected" : ""}>Lesson Plan</option>
+              <option value="otherDocuments" ${p.category === "otherDocuments" ? "selected" : ""}>Other Documents</option>
+            </select>
+          </div>
+          <div class="upload-field" id="staged-doc-name-field" style="${p.category === "otherDocuments" ? "" : "display:none;"}">
+            <label>Document name</label>
+            <input type="text" id="staged-doc-name" value="${esc(p.docName || "")}" placeholder="e.g. Term 2 Attendance Sheet" ${state.busyUpload ? "disabled" : ""} />
+          </div>
+        </div>
+        <div class="doc-row" style="margin-top:2px;">
+          <span style="flex:1;">📄 ${esc(p.fileName)}</span>
+        </div>
+        <div class="upload-row" style="margin-top:10px;">
+          <button class="btn btn-danger" data-action="cancel-staged-upload" ${state.busyUpload ? "disabled" : ""}>🗑 Remove</button>
+          <button class="btn btn-dark" data-action="submit-staged-upload" ${state.busyUpload ? "disabled" : ""}>${state.busyUpload ? "Submitting…" : "✅ Submit to folder"}</button>
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="upload-box">
+      <div class="title">Upload a document</div>
+      <div class="upload-row">
+        <div class="upload-field">
+          <label>Category</label>
+          <select id="upload-category">
+            <option value="lessonPlan">Lesson Plan</option>
+            <option value="otherDocuments">Other Documents</option>
+          </select>
+        </div>
+        <div class="upload-field" id="doc-name-field" style="display:none;">
+          <label>Document name</label>
+          <input type="text" id="upload-doc-name" placeholder="e.g. Term 2 Attendance Sheet" />
+        </div>
+        <button class="btn btn-dark" id="choose-file-btn">📤 Choose File</button>
+        <input type="file" id="upload-file-input" style="display:none;" />
+      </div>
+    </div>
   `;
 }
 
@@ -763,6 +798,38 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
     if (action === "delete-doc") return removeDocument(el.dataset.id);
+
+    if (action === "cancel-staged-upload") {
+      state.pendingUpload = null;
+      return render();
+    }
+
+    if (action === "submit-staged-upload") {
+      const p = state.pendingUpload;
+      if (!p) return;
+      if (p.category === "otherDocuments" && !p.docName.trim()) {
+        alert("Please give this document a name first.");
+        return;
+      }
+      state.busyUpload = true;
+      render();
+      try {
+        await addDocument({
+          teacherId: state.activeTeacherId,
+          category: p.category,
+          fileName: p.fileName,
+          docName: p.category === "otherDocuments" ? p.docName.trim() : undefined,
+          mimeType: p.mimeType,
+          dataUrl: p.dataUrl,
+          uploadedAt: new Date().toISOString(),
+        });
+      } finally {
+        state.pendingUpload = null;
+        state.busyUpload = false;
+        render();
+      }
+      return;
+    }
     if (action === "close-modal") { state.modal = null; return render(); }
     if (action === "open-change-pin") { state.modal = { type: "changePin" }; return render(); }
 
@@ -887,25 +954,30 @@ document.addEventListener("DOMContentLoaded", () => {
         e.target.value = "";
         return;
       }
-      state.busyUpload = true;
+      // Stage the file for review — it is NOT uploaded yet. The teacher can still
+      // edit the name/category, remove it and pick a different file, or submit it.
+      const dataUrl = await readFileAsDataUrl(file);
+      state.pendingUpload = {
+        category,
+        docName: category === "otherDocuments" ? docName : "",
+        fileName: file.name,
+        mimeType: file.type,
+        dataUrl,
+      };
       render();
-      // re-attach listener after re-render since element was replaced
-      try {
-        const dataUrl = await readFileAsDataUrl(file);
-        await addDocument({
-          teacherId: state.activeTeacherId,
-          category,
-          fileName: file.name,
-          docName: category === "otherDocuments" ? docName : undefined,
-          mimeType: file.type,
-          dataUrl,
-          uploadedAt: new Date().toISOString(),
-        });
-      } finally {
-        state.busyUpload = false;
-        render();
-      }
       return;
+    }
+
+    if (e.target.id === "staged-category") {
+      if (state.pendingUpload) state.pendingUpload.category = e.target.value;
+      return render();
+    }
+  });
+
+  // Keep the staged document name in sync as the teacher edits it before submitting
+  document.getElementById("app").addEventListener("input", (e) => {
+    if (e.target.id === "staged-doc-name" && state.pendingUpload) {
+      state.pendingUpload.docName = e.target.value;
     }
   });
 
