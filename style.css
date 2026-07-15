@@ -39,7 +39,7 @@ th, td { text-align: left; padding: 10px 12px; font-size: 13.5px; border-bottom:
 th { font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.03em; color: #6B5E45; }
 
 header.top {
-  background: #05437e; color: #e5f5f7; padding: 22px 20px 26px;
+  background: #6B2C2C; color: #F2E9D8; padding: 22px 20px 26px;
 }
 .header-inner {
   display: flex; justify-content: space-between; align-items: flex-start;
