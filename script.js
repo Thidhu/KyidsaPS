@@ -1,6 +1,6 @@
 // ---------- Constants ----------
 // PASTE YOUR APPS SCRIPT WEB APP URL HERE (from Deploy > New deployment)
-const BACKEND_URL = "PASTE_YOUR_APPS_SCRIPT_URL_HERE";
+const BACKEND_URL = "https://script.google.com/macros/s/AKfycbyicyLa4J7xvhWyYg8z9rFbz_dONQEnbr_nO9s3VJz2/dev";
 
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const CATEGORY_LABEL = { lessonPlan: "Lesson Plan", otherDocuments: "Other Documents" };
