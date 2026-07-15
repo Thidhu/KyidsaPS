@@ -10,8 +10,8 @@ function emptyData() {
     teachers: [],
     documents: [],
     schedules: {
-      lessonPlan: { type: "weekly", weekday: 1 },
-      otherDocuments: { type: "monthly", dayOfMonth: 28 },
+      lessonPlan: { type: "Daily", weekday: 1 },
+      otherDocuments: { type: "None", dayOfMonth:1 },
     },
     overrides: {},
     adminPin: null,
