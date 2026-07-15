@@ -140,7 +140,9 @@ function backendToState(raw) {
 
   const documents = (raw.uploads || []).map((u) => ({
     id: u.ID, teacherId: u.TeacherID, category: u.Category, fileName: u.FileName,
-    docName: u.DocName || undefined, dataUrl: u.DriveFileURL, uploadedAt: u.UploadedAt,
+    docName: u.DocName || undefined, docClass: u.Class || undefined, docSubject: u.Subject || undefined,
+    dataUrl: u.DriveFileURL, uploadedAt: u.UploadedAt,
+    comment: u.Comment || "", commentSeen: String(u.CommentSeen).toLowerCase() !== "false",
   }));
 
   const settings = raw.settings || {};
@@ -250,13 +252,16 @@ async function addDocument(doc) {
     category: doc.category,
     fileName: doc.fileName,
     docName: doc.docName || "",
+    class: doc.docClass || "",
+    subject: doc.docSubject || "",
     mimeType: doc.mimeType,
     fileBase64: doc.dataUrl,
   });
   if (res && res.success) {
     state.data.documents.push({
       id: res.id, teacherId: doc.teacherId, category: doc.category, fileName: doc.fileName,
-      docName: doc.docName, dataUrl: res.fileUrl, uploadedAt: doc.uploadedAt,
+      docName: doc.docName, docClass: doc.docClass, docSubject: doc.docSubject,
+      dataUrl: res.fileUrl, uploadedAt: doc.uploadedAt, comment: "", commentSeen: true,
     });
     state.saveError = "";
   } else {
@@ -337,6 +342,30 @@ async function setAdminPin(pin) {
   showToast(res && res.success ? "Principal PIN updated" : "Failed to update PIN");
 }
 
+async function saveComment(docId, commentText) {
+  const res = await apiPost({ action: "setComment", docId, comment: commentText });
+  if (res && res.success) {
+    const doc = state.data.documents.find((d) => d.id === docId);
+    if (doc) {
+      doc.comment = commentText;
+      doc.commentSeen = false;
+    }
+    state.saveError = "";
+  } else {
+    state.saveError = "Could not save feedback. Please try again.";
+  }
+  render();
+  showToast(res && res.success ? "Feedback saved" : "Failed to save feedback");
+}
+
+async function markCommentSeen(docId) {
+  const res = await apiPost({ action: "markCommentSeen", docId });
+  if (res && res.success) {
+    const doc = state.data.documents.find((d) => d.id === docId);
+    if (doc) doc.commentSeen = true;
+  }
+}
+
 // ---------- Navigation ----------
 function openFolder(teacherId) {
   state.activeTeacherId = teacherId;
@@ -348,9 +377,11 @@ function handleTeacherLogin(teacherId) {
   state.session = { teacherId };
   state.modal = null;
   const lpStatus = getStatus(state.data, teacherId, "lessonPlan", state.today);
+  const feedbackDocs = state.data.documents.filter((d) => d.teacherId === teacherId && d.comment && !d.commentSeen);
   openFolder(teacherId);
-  if (lpStatus.overdue) {
-    state.modal = { type: "reminder", items: [{ cat: "lessonPlan", status: lpStatus }] };
+  const overdueItems = lpStatus.overdue ? [{ cat: "lessonPlan", status: lpStatus }] : [];
+  if (overdueItems.length > 0 || feedbackDocs.length > 0) {
+    state.modal = { type: "notice", overdueItems, feedbackDocs };
   }
   render();
 }
@@ -625,6 +656,16 @@ function renderUploadBox() {
               <option value="otherDocuments" ${p.category === "otherDocuments" ? "selected" : ""}>Other Documents</option>
             </select>
           </div>
+          <div class="upload-field" id="staged-lp-fields" style="${p.category === "lessonPlan" ? "display:flex; gap:10px;" : "display:none;"}">
+            <div>
+              <label>Class</label>
+              <input type="text" id="staged-class" value="${esc(p.docClass || "")}" placeholder="e.g. Class III" ${state.busyUpload ? "disabled" : ""} />
+            </div>
+            <div>
+              <label>Subject</label>
+              <input type="text" id="staged-subject" value="${esc(p.docSubject || "")}" placeholder="e.g. Dzongkha" ${state.busyUpload ? "disabled" : ""} />
+            </div>
+          </div>
           <div class="upload-field" id="staged-doc-name-field" style="${p.category === "otherDocuments" ? "" : "display:none;"}">
             <label>Document name</label>
             <input type="text" id="staged-doc-name" value="${esc(p.docName || "")}" placeholder="e.g. Term 2 Attendance Sheet" ${state.busyUpload ? "disabled" : ""} />
@@ -652,6 +693,16 @@ function renderUploadBox() {
             <option value="otherDocuments">Other Documents</option>
           </select>
         </div>
+        <div class="upload-field" id="lp-fields" style="display:flex; gap:10px;">
+          <div>
+            <label>Class</label>
+            <input type="text" id="upload-class" placeholder="e.g. Class III" />
+          </div>
+          <div>
+            <label>Subject</label>
+            <input type="text" id="upload-subject" placeholder="e.g. Dzongkha" />
+          </div>
+        </div>
         <div class="upload-field" id="doc-name-field" style="display:none;">
           <label>Document name</label>
           <input type="text" id="upload-doc-name" placeholder="e.g. Term 2 Attendance Sheet" />
@@ -671,12 +722,34 @@ function docSectionHtml(title, docs, canDelete, showDocName) {
         <span class="count">(${docs.length})</span>
       </div>
       ${docs.length === 0 ? `<div class="doc-empty">No files here yet.</div>` : docs.map((d) => `
-        <div class="doc-row">
-          <a href="${d.dataUrl}" download="${esc(d.fileName)}">${showDocName && d.docName ? esc(d.docName) : esc(d.fileName)}</a>
-          <span class="date">${fmtDate(d.uploadedAt)}</span>
-          ${canDelete ? `<button class="del" data-action="delete-doc" data-id="${d.id}">🗑</button>` : ""}
+        <div class="doc-item">
+          <div class="doc-row">
+            <a href="${d.dataUrl}" download="${esc(d.fileName)}">${showDocName && d.docName ? esc(d.docName) : esc(d.fileName)}</a>
+            <span class="date">${fmtDate(d.uploadedAt)}</span>
+            ${canDelete ? `<button class="del" data-action="delete-doc" data-id="${d.id}">🗑</button>` : ""}
+          </div>
+          ${!showDocName && (d.docClass || d.docSubject) ? `<div class="doc-meta">🏫 ${esc(d.docClass || "—")} &nbsp;•&nbsp; 📘 ${esc(d.docSubject || "—")}</div>` : ""}
+          ${d.comment ? `<div class="comment-display">💬 ${esc(d.comment)}</div>` : ""}
+          ${canDelete ? commentEditorHtml(d.id, d.comment) : ""}
         </div>
       `).join("")}
+    </div>
+  `;
+}
+
+function commentEditorHtml(docId, currentComment) {
+  return `
+    <div class="comment-wrap" data-doc="${docId}">
+      <button class="override-btn" data-action="toggle-comment" data-doc="${docId}">
+        💬 ${currentComment ? "Edit feedback" : "Add feedback"}
+      </button>
+      <div class="comment-edit" style="display:none;">
+        <textarea data-role="comment-text" rows="2" placeholder="Write feedback for the teacher…">${esc(currentComment || "")}</textarea>
+        <div style="display:flex; gap:6px; margin-top:6px;">
+          <button class="btn btn-dark" data-action="save-comment" data-doc="${docId}">Save</button>
+          <button class="modal-close" data-action="toggle-comment" data-doc="${docId}">✕</button>
+        </div>
+      </div>
     </div>
   `;
 }
@@ -689,7 +762,7 @@ function renderModal() {
   if (m.type === "teacherLogin") return renderTeacherLoginModal();
   if (m.type === "adminPin") return renderAdminPinModal();
   if (m.type === "changePin") return renderChangePinModal();
-  if (m.type === "reminder") return renderReminderModal(m.items);
+  if (m.type === "notice") return renderNoticeModal(m.overdueItems, m.feedbackDocs);
   return "";
 }
 
@@ -786,24 +859,32 @@ function renderChangePinModal() {
   `;
 }
 
-function renderReminderModal(items) {
+function renderNoticeModal(overdueItems, feedbackDocs) {
+  const hasOverdue = overdueItems && overdueItems.length > 0;
+  const hasFeedback = feedbackDocs && feedbackDocs.length > 0;
   return `
-    <div class="modal-overlay" data-action="modal-overlay-close">
-      <div class="modal-box" data-stop-close="1" style="max-width:360px;">
+    <div class="modal-overlay">
+      <div class="modal-box" data-stop-close="1" style="max-width:380px;">
         <div class="modal-head" style="align-items:center;">
           <div style="display:flex; align-items:center; gap:8px;">
-            <span style="font-size:20px;">⚠️</span>
-            <div class="modal-title">You have pending submissions</div>
+            <span style="font-size:20px;">🔔</span>
+            <div class="modal-title">Updates for you</div>
           </div>
         </div>
         <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:18px;">
-          ${items.map(({ cat, status }) => `
-            <div style="background:#F6D9D3; border-radius:9px; padding:10px 12px; font-size:13.5px; color:#7A2E2E;">
-              <strong>${CATEGORY_LABEL[cat]}</strong> — ${status.count}/${status.required} submitted today
+          ${hasOverdue ? overdueItems.map(({ cat, status }) => `
+            <div style="background:rgba(244,223,225,0.85); border-radius:9px; padding:10px 12px; font-size:13.5px; color:#7c1d2e;">
+              <strong>⚠ ${CATEGORY_LABEL[cat]}</strong> — ${status.count}/${status.required} submitted today
             </div>
-          `).join("")}
+          `).join("") : ""}
+          ${hasFeedback ? feedbackDocs.map((d) => `
+            <div style="background:rgba(223,233,225,0.85); border-radius:9px; padding:10px 12px; font-size:13.5px; color:#1e2733;">
+              <strong>💬 Feedback on ${esc(d.docName || d.fileName)}</strong>
+              <div style="margin-top:4px;">${esc(d.comment)}</div>
+            </div>
+          `).join("") : ""}
         </div>
-        <button class="btn btn-dark" style="width:100%; justify-content:center;" data-action="close-modal">Got it</button>
+        <button class="btn btn-dark" style="width:100%; justify-content:center;" data-action="close-notice">Got it</button>
       </div>
     </div>
   `;
@@ -855,6 +936,10 @@ document.addEventListener("DOMContentLoaded", () => {
         alert("Please give this document a name first.");
         return;
       }
+      if (p.category === "lessonPlan" && (!p.docClass.trim() || !p.docSubject.trim())) {
+        alert("Please fill in the Class and Subject first.");
+        return;
+      }
       state.busyUpload = true;
       render();
       try {
@@ -863,6 +948,8 @@ document.addEventListener("DOMContentLoaded", () => {
           category: p.category,
           fileName: p.fileName,
           docName: p.category === "otherDocuments" ? p.docName.trim() : undefined,
+          docClass: p.category === "lessonPlan" ? p.docClass.trim() : undefined,
+          docSubject: p.category === "lessonPlan" ? p.docSubject.trim() : undefined,
           mimeType: p.mimeType,
           dataUrl: p.dataUrl,
           uploadedAt: new Date().toISOString(),
@@ -875,12 +962,33 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
     if (action === "close-modal") { state.modal = null; return render(); }
+
+    if (action === "close-notice") {
+      const feedbackDocs = (state.modal && state.modal.feedbackDocs) || [];
+      state.modal = null;
+      render();
+      for (const d of feedbackDocs) await markCommentSeen(d.id);
+      return;
+    }
+
     if (action === "open-change-pin") { state.modal = { type: "changePin" }; return render(); }
 
     if (action === "toggle-override") {
       const wrap = el.closest(".override-wrap");
       const editRow = wrap.querySelector(".override-edit");
       editRow.style.display = editRow.style.display === "none" ? "flex" : "none";
+      return;
+    }
+    if (action === "toggle-comment") {
+      const wrap = el.closest(".comment-wrap");
+      const editRow = wrap.querySelector(".comment-edit");
+      editRow.style.display = editRow.style.display === "none" ? "block" : "none";
+      return;
+    }
+    if (action === "save-comment") {
+      const wrap = el.closest(".comment-wrap");
+      const text = wrap.querySelector("[data-role='comment-text']").value.trim();
+      await saveComment(el.dataset.doc, text);
       return;
     }
     if (action === "save-override") {
@@ -970,7 +1078,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (e.target.id === "upload-category") {
       const docNameField = document.getElementById("doc-name-field");
+      const lpFields = document.getElementById("lp-fields");
       docNameField.style.display = e.target.value === "otherDocuments" ? "block" : "none";
+      lpFields.style.display = e.target.value === "lessonPlan" ? "flex" : "none";
       return;
     }
 
@@ -985,8 +1095,15 @@ document.addEventListener("DOMContentLoaded", () => {
       const category = document.getElementById("upload-category").value;
       const docNameInput = document.getElementById("upload-doc-name");
       const docName = docNameInput ? docNameInput.value.trim() : "";
+      const docClass = document.getElementById("upload-class").value.trim();
+      const docSubject = document.getElementById("upload-subject").value.trim();
       if (category === "otherDocuments" && !docName) {
         alert("Please give this document a name first.");
+        e.target.value = "";
+        return;
+      }
+      if (category === "lessonPlan" && (!docClass || !docSubject)) {
+        alert("Please fill in the Class and Subject first.");
         e.target.value = "";
         return;
       }
@@ -996,6 +1113,8 @@ document.addEventListener("DOMContentLoaded", () => {
       state.pendingUpload = {
         category,
         docName: category === "otherDocuments" ? docName : "",
+        docClass: category === "lessonPlan" ? docClass : "",
+        docSubject: category === "lessonPlan" ? docSubject : "",
         fileName: file.name,
         mimeType: file.type,
         dataUrl,
@@ -1010,10 +1129,16 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // Keep the staged document name in sync as the teacher edits it before submitting
+  // Keep the staged document name / class / subject in sync as the teacher edits before submitting
   document.getElementById("app").addEventListener("input", (e) => {
     if (e.target.id === "staged-doc-name" && state.pendingUpload) {
       state.pendingUpload.docName = e.target.value;
+    }
+    if (e.target.id === "staged-class" && state.pendingUpload) {
+      state.pendingUpload.docClass = e.target.value;
+    }
+    if (e.target.id === "staged-subject" && state.pendingUpload) {
+      state.pendingUpload.docSubject = e.target.value;
     }
   });
 
