@@ -2,7 +2,6 @@
 // PASTE YOUR APPS SCRIPT WEB APP URL HERE (from Deploy > New deployment)
 const BACKEND_URL = "https://script.google.com/macros/s/AKfycbxNO55TNKEu2y1UFVUkz1tT5XE8_W-0muIJyv7kLCSjjIPypMQTF2Cg96WwO-yBFxWrDg/exec";
 
-const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const CATEGORY_LABEL = { lessonPlan: "Lesson Plan", otherDocuments: "Other Document" };
 
 function emptyData() {
@@ -10,8 +9,8 @@ function emptyData() {
     teachers: [],
     documents: [],
     schedules: {
-      lessonPlan: { type: "Daily", weekday: 1 },
-      otherDocuments: { type: "None", dayOfMonth:1 },
+      lessonPlan: { type: "daily", requiredCount: 2 },
+      otherDocuments: { type: "calendar", dates: [] },
     },
     overrides: {},
     adminPin: null,
@@ -54,27 +53,28 @@ function startOfDay(d) {
   return x;
 }
 
-function computeRecurringDues(schedule, today) {
-  if (!schedule || schedule.type === "none") return { mostRecentDue: null, nextDue: null };
+function computeCalendarDues(schedule, today) {
+  const dates = (schedule && schedule.dates ? schedule.dates : [])
+    .map((s) => startOfDay(new Date(s)))
+    .sort((a, b) => a - b);
   const t = startOfDay(today);
-  if (schedule.type === "weekly") {
-    const target = schedule.weekday ?? 1;
-    const diffToday = (t.getDay() - target + 7) % 7;
-    const mostRecentDue = new Date(t);
-    mostRecentDue.setDate(t.getDate() - diffToday);
-    const nextDue = new Date(mostRecentDue);
-    nextDue.setDate(mostRecentDue.getDate() + 7);
-    return { mostRecentDue, nextDue };
+  let mostRecentDue = null;
+  let nextDue = null;
+  for (const d of dates) {
+    if (d <= t) mostRecentDue = d;
+    else { nextDue = d; break; }
   }
-  if (schedule.type === "monthly") {
-    const dom = Math.min(schedule.dayOfMonth ?? 28, 28);
-    let mostRecentDue = new Date(t.getFullYear(), t.getMonth(), dom);
-    if (mostRecentDue > t) mostRecentDue = new Date(t.getFullYear(), t.getMonth() - 1, dom);
-    const nextDue = new Date(mostRecentDue);
-    nextDue.setMonth(nextDue.getMonth() + 1);
-    return { mostRecentDue, nextDue };
-  }
-  return { mostRecentDue: null, nextDue: null };
+  return { mostRecentDue, nextDue };
+}
+
+function computeLessonPlanStatus(schedule, documents, teacherId, today) {
+  const required = (schedule && schedule.requiredCount) || 2;
+  const t = startOfDay(today);
+  const count = documents.filter((d) => {
+    if (d.teacherId !== teacherId || d.category !== "lessonPlan") return false;
+    return startOfDay(new Date(d.uploadedAt)).getTime() === t.getTime();
+  }).length;
+  return { overdue: count < required, required, count, dueDate: t };
 }
 
 function latestUploadDate(documents, teacherId, category) {
@@ -84,6 +84,11 @@ function latestUploadDate(documents, teacherId, category) {
 }
 
 function getStatus(data, teacherId, category, today) {
+  if (category === "lessonPlan") {
+    return computeLessonPlanStatus(data.schedules.lessonPlan, data.documents, teacherId, today);
+  }
+
+  // otherDocuments — calendar-based due dates, with optional per-teacher custom override
   const overrideKey = `${teacherId}:${category}`;
   const customDueStr = data.overrides[overrideKey];
   const last = latestUploadDate(data.documents, teacherId, category);
@@ -95,8 +100,8 @@ function getStatus(data, teacherId, category, today) {
     return { overdue, dueDate: customDue, source: "custom", lastUpload: last };
   }
 
-  const { mostRecentDue, nextDue } = computeRecurringDues(data.schedules[category], today);
-  if (!mostRecentDue) return { overdue: false, dueDate: null, source: null, lastUpload: last };
+  const { mostRecentDue, nextDue } = computeCalendarDues(data.schedules.otherDocuments, today);
+  if (!mostRecentDue) return { overdue: false, dueDate: nextDue || null, source: null, lastUpload: last };
   const overdue = t >= mostRecentDue && (!last || last < mostRecentDue);
   return { overdue, dueDate: overdue ? mostRecentDue : nextDue, source: "recurring", lastUpload: last };
 }
@@ -140,8 +145,8 @@ function backendToState(raw) {
 
   const settings = raw.settings || {};
   const schedules = {
-    lessonPlan: settings.schedule_lessonPlan ? JSON.parse(settings.schedule_lessonPlan) : { type: "weekly", weekday: 1 },
-    otherDocuments: settings.schedule_otherDocuments ? JSON.parse(settings.schedule_otherDocuments) : { type: "monthly", dayOfMonth: 28 },
+    lessonPlan: settings.schedule_lessonPlan ? JSON.parse(settings.schedule_lessonPlan) : { type: "daily", requiredCount: 2 },
+    otherDocuments: settings.schedule_otherDocuments ? JSON.parse(settings.schedule_otherDocuments) : { type: "calendar", dates: [] },
   };
 
   const overrides = {};
@@ -286,6 +291,25 @@ async function updateSchedule(category, schedule) {
   showToast(res && res.success ? "Schedule updated" : "Failed to update");
 }
 
+async function saveLessonPlanRequiredCount(count) {
+  const n = Math.max(1, Math.min(10, Number(count) || 2));
+  await updateSchedule("lessonPlan", { type: "daily", requiredCount: n });
+}
+
+async function addCalendarDueDate(dateStr) {
+  if (!dateStr) return;
+  const current = (state.data.schedules.otherDocuments && state.data.schedules.otherDocuments.dates) || [];
+  if (current.includes(dateStr)) return;
+  const dates = [...current, dateStr].sort();
+  await updateSchedule("otherDocuments", { type: "calendar", dates });
+}
+
+async function removeCalendarDueDate(dateStr) {
+  const current = (state.data.schedules.otherDocuments && state.data.schedules.otherDocuments.dates) || [];
+  const dates = current.filter((d) => d !== dateStr);
+  await updateSchedule("otherDocuments", { type: "calendar", dates });
+}
+
 async function setOverride(teacherId, category, dateStr) {
   const key = `override_${teacherId}_${category}`;
   const res = await apiPost({ action: "setSetting", key, value: dateStr || "" });
@@ -323,12 +347,10 @@ function openFolder(teacherId) {
 function handleTeacherLogin(teacherId) {
   state.session = { teacherId };
   state.modal = null;
-  const pending = ["lessonPlan", "otherDocuments"]
-    .map((cat) => ({ cat, status: getStatus(state.data, teacherId, cat, state.today) }))
-    .filter((x) => x.status.overdue);
+  const lpStatus = getStatus(state.data, teacherId, "lessonPlan", state.today);
   openFolder(teacherId);
-  if (pending.length > 0) {
-    state.modal = { type: "reminder", items: pending };
+  if (lpStatus.overdue) {
+    state.modal = { type: "reminder", items: [{ cat: "lessonPlan", status: lpStatus }] };
   }
   render();
 }
@@ -438,7 +460,12 @@ function renderTeacherCard(t) {
   `;
 }
 
-function statusPillHtml(status) {
+function lessonPlanPillHtml(status) {
+  if (status.overdue) return `<span class="pill pill-overdue">⚠ ${status.count}/${status.required} submitted today</span>`;
+  return `<span class="pill pill-ok">✅ ${status.count}/${status.required} submitted today</span>`;
+}
+
+function otherDocsPillHtml(status) {
   if (!status.dueDate) return `<span class="pill pill-none">No schedule</span>`;
   if (status.overdue) return `<span class="pill pill-overdue">⚠ Overdue since ${fmtDate(status.dueDate)}</span>`;
   return `<span class="pill pill-ok">✅ On track</span>`;
@@ -452,8 +479,8 @@ function renderDashboard() {
     return `
       <tr>
         <td style="font-weight:600;">${esc(t.name)}</td>
-        <td>${statusPillHtml(lp)}${overrideEditorHtml(t.id, "lessonPlan", data.overrides[`${t.id}:lessonPlan`])}</td>
-        <td>${statusPillHtml(od)}${overrideEditorHtml(t.id, "otherDocuments", data.overrides[`${t.id}:otherDocuments`])}</td>
+        <td>${lessonPlanPillHtml(lp)}</td>
+        <td>${otherDocsPillHtml(od)}${overrideEditorHtml(t.id, "otherDocuments", data.overrides[`${t.id}:otherDocuments`])}</td>
         <td><button class="btn" style="background:transparent; color:#2C4A3E; padding:4px 6px;" data-action="open-folder" data-id="${t.id}">📁</button></td>
       </tr>
     `;
@@ -469,8 +496,8 @@ function renderDashboard() {
     </div>
 
     <div class="schedule-grid">
-      ${scheduleEditorHtml("lessonPlan", state.data.schedules.lessonPlan)}
-      ${scheduleEditorHtml("otherDocuments", state.data.schedules.otherDocuments)}
+      ${lessonPlanScheduleEditorHtml(state.data.schedules.lessonPlan)}
+      ${otherDocumentsCalendarEditorHtml(state.data.schedules.otherDocuments)}
     </div>
 
     <div class="dash-table-wrap">
@@ -501,31 +528,46 @@ function overrideEditorHtml(teacherId, category, current) {
   `;
 }
 
-function scheduleEditorHtml(category, schedule) {
-  const type = schedule.type;
+function lessonPlanScheduleEditorHtml(schedule) {
+  const required = (schedule && schedule.requiredCount) || 2;
   return `
-    <div class="schedule-box" data-category="${category}">
-      <div class="title">${CATEGORY_LABEL[category]} schedule</div>
+    <div class="schedule-box">
+      <div class="title">Lesson Plan requirement</div>
       <div class="schedule-row">
         <div class="schedule-field">
-          <label>Recurrence</label>
-          <select data-role="schedule-type" data-category="${category}">
-            <option value="none" ${type === "none" ? "selected" : ""}>None</option>
-            <option value="weekly" ${type === "weekly" ? "selected" : ""}>Weekly</option>
-            <option value="monthly" ${type === "monthly" ? "selected" : ""}>Monthly</option>
-          </select>
+          <label>Required per day</label>
+          <input type="number" min="1" max="10" id="lp-required-count" value="${required}" />
         </div>
-        <div class="schedule-field" data-only="weekly" style="${type === "weekly" ? "" : "display:none;"}">
-          <label>Day</label>
-          <select data-role="schedule-weekday" data-category="${category}">
-            ${WEEKDAYS.map((d, i) => `<option value="${i}" ${schedule.weekday === i ? "selected" : ""}>${d}</option>`).join("")}
-          </select>
+        <button class="btn btn-dark" data-action="save-lessonplan-schedule">Save</button>
+      </div>
+      <div style="font-size:12px; color:#6B5E45; margin-top:8px;">
+        Every teacher must submit ${required} lesson plan${required === 1 ? "" : "s"} each day. A reminder pops up for them if they log in without having done so.
+      </div>
+    </div>
+  `;
+}
+
+function otherDocumentsCalendarEditorHtml(schedule) {
+  const dates = ((schedule && schedule.dates) || []).slice().sort();
+  return `
+    <div class="schedule-box">
+      <div class="title">Other Documents — due dates</div>
+      <div class="schedule-row">
+        <div class="schedule-field">
+          <label>Add a due date</label>
+          <input type="date" id="od-new-date" />
         </div>
-        <div class="schedule-field" data-only="monthly" style="${type === "monthly" ? "" : "display:none;"}">
-          <label>Day of month</label>
-          <input type="number" min="1" max="28" data-role="schedule-dom" data-category="${category}" value="${schedule.dayOfMonth ?? 28}" />
-        </div>
-        <button class="btn btn-dark" data-action="save-schedule" data-category="${category}">Save</button>
+        <button class="btn btn-dark" data-action="add-calendar-date">➕ Add</button>
+      </div>
+      <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:10px;">
+        ${dates.length === 0
+          ? `<span style="font-size:12px; color:#9A8F72;">No due dates set yet.</span>`
+          : dates.map((d) => `
+              <span class="pill" style="background:#E4DEC9; color:#4A3B22;">
+                ${fmtDate(d)}
+                <button data-action="remove-calendar-date" data-date="${d}" style="background:none; border:none; color:#7A2E2E; cursor:pointer; font-size:12px; padding:0 0 0 4px;">✕</button>
+              </span>
+            `).join("")}
       </div>
     </div>
   `;
@@ -540,7 +582,8 @@ function renderFolder(teacher) {
   const lessonPlans = documents.filter((d) => d.category === "lessonPlan");
   const otherDocs = documents.filter((d) => d.category === "otherDocuments");
 
-  const statuses = ["lessonPlan", "otherDocuments"].map((cat) => ({ cat, status: getStatus(state.data, teacher.id, cat, state.today) }));
+  const lpStatus = getStatus(state.data, teacher.id, "lessonPlan", state.today);
+  const odStatus = getStatus(state.data, teacher.id, "otherDocuments", state.today);
 
   return `
     ${showBack ? `<button class="btn btn-plain" data-action="back-to-directory">⬅ Back to directory</button>` : ""}
@@ -556,7 +599,8 @@ function renderFolder(teacher) {
     </div>
 
     <div class="status-row">
-      ${statuses.map(({ cat, status }) => `<div><span class="label">${CATEGORY_LABEL[cat]}:</span>${statusPillHtml(status)}</div>`).join("")}
+      <div><span class="label">${CATEGORY_LABEL.lessonPlan}:</span>${lessonPlanPillHtml(lpStatus)}</div>
+      <div><span class="label">${CATEGORY_LABEL.otherDocuments}:</span>${otherDocsPillHtml(odStatus)}</div>
     </div>
 
     ${canUpload ? renderUploadBox() : ""}
@@ -755,7 +799,7 @@ function renderReminderModal(items) {
         <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:18px;">
           ${items.map(({ cat, status }) => `
             <div style="background:#F6D9D3; border-radius:9px; padding:10px 12px; font-size:13.5px; color:#7A2E2E;">
-              <strong>${CATEGORY_LABEL[cat]}</strong> — due ${fmtDate(status.dueDate)}
+              <strong>${CATEGORY_LABEL[cat]}</strong> — ${status.count}/${status.required} submitted today
             </div>
           `).join("")}
         </div>
@@ -849,19 +893,19 @@ document.addEventListener("DOMContentLoaded", () => {
       await setOverride(el.dataset.teacher, el.dataset.category, null);
       return;
     }
-    if (action === "save-schedule") {
-      const box = el.closest(".schedule-box");
-      const category = el.dataset.category;
-      const type = box.querySelector("[data-role='schedule-type']").value;
-      if (type === "weekly") {
-        const weekday = Number(box.querySelector("[data-role='schedule-weekday']").value);
-        await updateSchedule(category, { type, weekday });
-      } else if (type === "monthly") {
-        const dayOfMonth = Number(box.querySelector("[data-role='schedule-dom']").value);
-        await updateSchedule(category, { type, dayOfMonth });
-      } else {
-        await updateSchedule(category, { type: "none" });
-      }
+    if (action === "save-lessonplan-schedule") {
+      const count = document.getElementById("lp-required-count").value;
+      await saveLessonPlanRequiredCount(count);
+      return;
+    }
+    if (action === "add-calendar-date") {
+      const val = document.getElementById("od-new-date").value;
+      if (!val) { alert("Pick a date first."); return; }
+      await addCalendarDueDate(val);
+      return;
+    }
+    if (action === "remove-calendar-date") {
+      await removeCalendarDueDate(el.dataset.date);
       return;
     }
 
@@ -927,14 +971,6 @@ document.addEventListener("DOMContentLoaded", () => {
     if (e.target.id === "upload-category") {
       const docNameField = document.getElementById("doc-name-field");
       docNameField.style.display = e.target.value === "otherDocuments" ? "block" : "none";
-      return;
-    }
-
-    if (e.target.dataset.role === "schedule-type") {
-      const box = e.target.closest(".schedule-box");
-      const type = e.target.value;
-      box.querySelector("[data-only='weekly']").style.display = type === "weekly" ? "block" : "none";
-      box.querySelector("[data-only='monthly']").style.display = type === "monthly" ? "block" : "none";
       return;
     }
 
