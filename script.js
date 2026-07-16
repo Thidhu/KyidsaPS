@@ -1,6 +1,6 @@
 // ---------- Constants ----------
 // PASTE YOUR APPS SCRIPT WEB APP URL HERE (from Deploy > New deployment)
-const BACKEND_URL = "https://script.google.com/macros/s/AKfycbxNO55TNKEu2y1UFVUkz1tT5XE8_W-0muIJyv7kLCSjjIPypMQTF2Cg96WwO-yBFxWrDg/exec";
+const BACKEND_URL = "https://script.google.com/macros/s/AKfycbyt9KHZ4FWIjaK0UqxkD_YW-yMCFqbikOXYCwzGi0khjumj5rpdM_cHD5sijwW9xHz53Q/exec";
 
 const CATEGORY_LABEL = { lessonPlan: "Lesson Plan", otherDocuments: "Other Document" };
 
