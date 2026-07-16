@@ -11,11 +11,17 @@ const PORTFOLIO_LINKS = [
   { label: "School Vision & Mission", url: "PASTE_LINK_HERE", icon: "🏫" },
 ];
 
+// Paste your published Google Form links here.
+// Use the form's "Send" > link icon URL (ending in /viewform). The app embeds it
+// automatically. Responses land in whatever Google Sheet you attach the form to —
+// share that sheet only with the principal to keep it principal-only viewing.
+const ATTENDANCE_FORM_URL = "https://forms.gle/zdDsEDyXt71dFQGf8";
+const TOD_FORM_URL = "https://forms.gle/9cC3tdPFxaXDSkJi8";
+
 function emptyData() {
   return {
     teachers: [],
     documents: [],
-    attendance: [],
     schedules: {
       lessonPlan: { type: "daily", requiredCount: 2 },
       otherDocuments: { type: "calendar", dates: [] },
@@ -40,6 +46,21 @@ const state = {
   busyUpload: false,
   pendingUpload: null, // { category, docName, fileName, mimeType, dataUrl } — staged, not yet submitted
 };
+
+// ---------- Decorative sky (generated once so it doesn't reshuffle on every render) ----------
+function generateStarsHtml(count) {
+  let html = "";
+  for (let i = 0; i < count; i++) {
+    const top = (Math.random() * 92).toFixed(1);
+    const left = (Math.random() * 100).toFixed(1);
+    const size = (Math.random() * 1.6 + 1).toFixed(1);
+    const delay = (Math.random() * 5).toFixed(2);
+    const duration = (Math.random() * 2 + 2.5).toFixed(2);
+    html += `<span class="star" style="top:${top}%; left:${left}%; width:${size}px; height:${size}px; animation-delay:${delay}s; animation-duration:${duration}s;"></span>`;
+  }
+  return html;
+}
+const SKY_STARS_HTML = generateStarsHtml(55);
 
 // ---------- Utils ----------
 function uid() {
@@ -153,11 +174,6 @@ function backendToState(raw) {
     comment: u.Comment || "", commentSeen: String(u.CommentSeen).toLowerCase() !== "false",
   }));
 
-  const attendance = (raw.attendance || []).map((a) => ({
-    id: a.ID, teacherId: a.TeacherID, class: a.Class, date: a.Date,
-    total: Number(a.Total) || 0, present: Number(a.Present) || 0, absent: Number(a.Absent) || 0,
-  }));
-
   const settings = raw.settings || {};
   const schedules = {
     lessonPlan: settings.schedule_lessonPlan ? JSON.parse(settings.schedule_lessonPlan) : { type: "daily", requiredCount: 2 },
@@ -176,7 +192,7 @@ function backendToState(raw) {
   });
 
   return {
-    teachers, documents, attendance, schedules, overrides,
+    teachers, documents, schedules, overrides,
     adminPin: settings.adminPin || null,
   };
 }
@@ -355,29 +371,6 @@ async function setAdminPin(pin) {
   showToast(res && res.success ? "Principal PIN updated" : "Failed to update PIN");
 }
 
-async function addAttendance(entry) {
-  const res = await apiPost({
-    action: "addAttendance",
-    teacherId: entry.teacherId,
-    class: entry.class,
-    date: entry.date,
-    total: entry.total,
-    present: entry.present,
-    absent: entry.absent,
-  });
-  if (res && res.success) {
-    const existingIdx = state.data.attendance.findIndex((a) => a.teacherId === entry.teacherId && a.date === entry.date);
-    const record = { id: res.id, teacherId: entry.teacherId, class: entry.class, date: entry.date, total: entry.total, present: entry.present, absent: entry.absent };
-    if (existingIdx >= 0) state.data.attendance[existingIdx] = record;
-    else state.data.attendance.push(record);
-    state.saveError = "";
-  } else {
-    state.saveError = "Could not save attendance: " + (res && res.error ? res.error : "unknown error, please try again.");
-  }
-  render();
-  showToast(res && res.success ? "Attendance saved" : "Failed to save attendance");
-}
-
 async function saveComment(docId, commentText) {
   const res = await apiPost({ action: "setComment", docId, comment: commentText });
   if (res && res.success) {
@@ -514,10 +507,30 @@ function renderEmptyState() {
 
 function renderHome() {
   return `
-    <div class="home-hero">
-      <h2 class="serif" style="font-size:22px; margin:0 0 6px; color:#1e2733;">Kyidsa Primary School Portal</h2>
-      <div style="font-size:13.5px; color:#45526b; margin-bottom:18px;">Everything the school needs, in one place.</div>
-      <button class="btn btn-dark" data-action="set-view" data-view="directory">👩‍🏫 Go to Teacher Directory</button>
+    <div class="sky-hero">
+      <div class="sky-stars">${SKY_STARS_HTML}</div>
+      <div class="moon"></div>
+      <div class="cloud cloud-1"></div>
+      <div class="cloud cloud-2"></div>
+      <div class="cloud cloud-3"></div>
+      <div class="sky-content">
+        <h2 class="serif" style="font-size:24px; margin:0 0 6px;">Kyidsa Primary School Portal</h2>
+        <div style="font-size:13.5px; color:#c7d0e6; margin-bottom:20px;">Everything the school needs, in one place.</div>
+        <button class="btn btn-ghost" data-action="set-view" data-view="directory">👩‍🏫 Go to Teacher Directory</button>
+      </div>
+    </div>
+
+    <div class="home-actions">
+      <button class="action-card" data-action="open-form" data-url="${esc(ATTENDANCE_FORM_URL)}" data-title="Attendance">
+        <span class="action-icon">📋</span>
+        <span class="action-label">Mark Attendance</span>
+        <span class="action-sub">Daily class attendance form</span>
+      </button>
+      <button class="action-card" data-action="open-form" data-url="${esc(TOD_FORM_URL)}" data-title="TOD Report">
+        <span class="action-icon">📝</span>
+        <span class="action-label">TOD Report</span>
+        <span class="action-sub">Teacher on Duty — activities &amp; remarks</span>
+      </button>
     </div>
 
     <div class="doc-section" style="margin-top:22px;">
@@ -600,25 +613,13 @@ function renderDashboard() {
       </table>
     </div>
 
-    <h3 class="serif" style="font-size:16px; margin:26px 0 10px; color:#4A3B22;">Attendance — latest by class</h3>
-    <div class="dash-table-wrap">
-      <table>
-        <thead><tr><th>Teacher</th><th>Class</th><th>Latest Date</th><th>Present / Total</th></tr></thead>
-        <tbody>
-          ${data.teachers.length === 0 ? `<tr><td colspan="4" style="color:#9A8F72; text-align:center; padding:20px;">No teachers yet.</td></tr>` : data.teachers.map((t) => {
-            const records = data.attendance.filter((a) => a.teacherId === t.id).sort((a, b) => (a.date < b.date ? 1 : -1));
-            const latest = records[0];
-            return `
-              <tr>
-                <td style="font-weight:600;">${esc(t.name)}</td>
-                <td>${latest ? esc(latest.class || "—") : "—"}</td>
-                <td>${latest ? fmtDate(latest.date) : "No entries yet"}</td>
-                <td>${latest ? `${latest.present}/${latest.total} (${latest.total > 0 ? Math.round((latest.present / latest.total) * 100) : 0}%)` : "—"}</td>
-              </tr>
-            `;
-          }).join("")}
-        </tbody>
-      </table>
+    <div class="doc-section" style="margin-top:22px;">
+      <div class="doc-section-head"><span>Attendance &amp; TOD Reports</span></div>
+      <div style="font-size:13px; color:#45526b; padding:2px 2px 10px;">
+        These are now collected through the Google Forms linked on the Home page. Open the response spreadsheet
+        attached to each form (share it only with yourself) to review them — set the form links in
+        <code>ATTENDANCE_FORM_URL</code> and <code>TOD_FORM_URL</code> near the top of script.js.
+      </div>
     </div>
   `;
 }
@@ -717,74 +718,9 @@ function renderFolder(teacher) {
     </div>
 
     ${canUpload ? renderUploadBox() : ""}
-    ${canUpload ? renderAttendanceBox(teacher) : ""}
-    ${renderAttendanceHistory(teacher)}
 
     ${docSectionHtml("Lesson Plans", lessonPlans, isPrincipal, false)}
     ${docSectionHtml("Other Documents", otherDocs, isPrincipal, true)}
-  `;
-}
-
-function todayIso() {
-  const t = state.today;
-  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
-}
-
-function renderAttendanceBox(teacher) {
-  const todayStr = todayIso();
-  const existing = state.data.attendance.find((a) => a.teacherId === teacher.id && a.date === todayStr);
-  return `
-    <div class="upload-box">
-      <div class="title">Attendance ${existing ? "— already submitted for today, editing will update it" : ""}</div>
-      <div class="upload-row">
-        <div class="upload-field">
-          <label>Date</label>
-          <input type="date" id="att-date" value="${todayStr}" />
-        </div>
-        <div class="upload-field">
-          <label>Class</label>
-          <input type="text" id="att-class" value="${esc(teacher.subject || "")}" placeholder="e.g. Class III" />
-        </div>
-        <div class="upload-field">
-          <label>Total students</label>
-          <input type="number" min="0" id="att-total" value="${existing ? existing.total : ""}" />
-        </div>
-        <div class="upload-field">
-          <label>Present</label>
-          <input type="number" min="0" id="att-present" value="${existing ? existing.present : ""}" />
-        </div>
-        <div class="upload-field">
-          <label>Absent</label>
-          <input type="number" min="0" id="att-absent" value="${existing ? existing.absent : ""}" />
-        </div>
-        <button class="btn btn-dark" data-action="submit-attendance" data-id="${teacher.id}">✅ Save Attendance</button>
-      </div>
-    </div>
-  `;
-}
-
-function renderAttendanceHistory(teacher) {
-  const records = state.data.attendance
-    .filter((a) => a.teacherId === teacher.id)
-    .sort((a, b) => (a.date < b.date ? 1 : -1))
-    .slice(0, 30);
-
-  return `
-    <div class="doc-section">
-      <div class="doc-section-head">
-        <span style="font-weight:700; font-size:15px;">Attendance History</span>
-        <span class="count">(${records.length})</span>
-      </div>
-      ${records.length === 0 ? `<div class="doc-empty">No attendance recorded yet.</div>` : records.map((a) => {
-        const rate = a.total > 0 ? Math.round((a.present / a.total) * 100) : 0;
-        return `
-          <div class="doc-row">
-            <span style="flex:1;">📋 ${fmtDate(a.date)} ${a.class ? `— ${esc(a.class)}` : ""}</span>
-            <span class="date">${a.present}/${a.total} present (${rate}%)</span>
-          </div>
-        `;
-      }).join("")}
-    </div>
   `;
 }
 
@@ -910,7 +846,30 @@ function renderModal() {
   if (m.type === "adminPin") return renderAdminPinModal();
   if (m.type === "changePin") return renderChangePinModal();
   if (m.type === "notice") return renderNoticeModal(m.overdueItems, m.feedbackDocs);
+  if (m.type === "formEmbed") return renderFormEmbedModal(m.url, m.title);
   return "";
+}
+
+function renderFormEmbedModal(url, title) {
+  // Google Forms accept an "embedded=true" query param for a cleaner iframe view
+  const sep = url.includes("?") ? "&" : "?";
+  const embedUrl = url.includes("embedded=true") ? url : `${url}${sep}embedded=true`;
+  return `
+    <div class="modal-overlay" data-action="modal-overlay-close">
+      <div class="modal-box form-modal-box" data-stop-close="1">
+        <div class="modal-head">
+          <div class="modal-title">${esc(title)}</div>
+          <button class="modal-close" data-action="close-modal">✕</button>
+        </div>
+        <div class="form-embed-wrap">
+          <iframe src="${esc(embedUrl)}" width="100%" height="640" frameborder="0" marginheight="0" marginwidth="0">Loading…</iframe>
+        </div>
+        <div style="text-align:center; margin-top:10px;">
+          <a href="${esc(url)}" target="_blank" rel="noopener" style="font-size:12.5px; color:#45526b;">Trouble viewing the form? Open it in a new tab ↗</a>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 function renderAddTeacherModal() {
@@ -1071,20 +1030,14 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     if (action === "delete-doc") return removeDocument(el.dataset.id);
 
-    if (action === "submit-attendance") {
-      const teacherId = el.dataset.id;
-      const date = document.getElementById("att-date").value;
-      const cls = document.getElementById("att-class").value.trim();
-      const total = Number(document.getElementById("att-total").value);
-      const present = Number(document.getElementById("att-present").value);
-      const absent = Number(document.getElementById("att-absent").value);
-      if (!date) { alert("Please pick a date."); return; }
-      if (!Number.isFinite(total) || !Number.isFinite(present) || !Number.isFinite(absent)) {
-        alert("Please fill in Total, Present, and Absent as numbers.");
+    if (action === "open-form") {
+      const url = el.dataset.url;
+      if (!url || url.startsWith("PASTE_")) {
+        alert("This form link hasn't been set up yet. Paste the Google Form link into ATTENDANCE_FORM_URL / TOD_FORM_URL near the top of script.js.");
         return;
       }
-      await addAttendance({ teacherId, class: cls, date, total, present, absent });
-      return;
+      state.modal = { type: "formEmbed", url, title: el.dataset.title || "Form" };
+      return render();
     }
 
     if (action === "cancel-staged-upload") {
