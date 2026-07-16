@@ -4,10 +4,18 @@ const BACKEND_URL = "https://script.google.com/macros/s/AKfycbxNO55TNKEu2y1UFVUk
 
 const CATEGORY_LABEL = { lessonPlan: "Lesson Plan", otherDocuments: "Other Document" };
 
+// Edit these to point at your actual links — shown on the Home page
+const PORTFOLIO_LINKS = [
+  { label: "School Records (Google Drive)", url: "PASTE_DRIVE_FOLDER_LINK_HERE", icon: "📁" },
+  { label: "Master Data Sheet", url: "PASTE_GOOGLE_SHEET_LINK_HERE", icon: "📊" },
+  { label: "School Vision & Mission", url: "PASTE_LINK_HERE", icon: "🏫" },
+];
+
 function emptyData() {
   return {
     teachers: [],
     documents: [],
+    attendance: [],
     schedules: {
       lessonPlan: { type: "daily", requiredCount: 2 },
       otherDocuments: { type: "calendar", dates: [] },
@@ -22,7 +30,7 @@ const state = {
   data: emptyData(),
   loaded: false,
   adminMode: false,
-  view: "directory", // directory | dashboard | folder
+  view: "home", // home | directory | dashboard | folder
   activeTeacherId: null,
   session: null, // { teacherId }
   modal: null, // { type, ...props }
@@ -145,6 +153,11 @@ function backendToState(raw) {
     comment: u.Comment || "", commentSeen: String(u.CommentSeen).toLowerCase() !== "false",
   }));
 
+  const attendance = (raw.attendance || []).map((a) => ({
+    id: a.ID, teacherId: a.TeacherID, class: a.Class, date: a.Date,
+    total: Number(a.Total) || 0, present: Number(a.Present) || 0, absent: Number(a.Absent) || 0,
+  }));
+
   const settings = raw.settings || {};
   const schedules = {
     lessonPlan: settings.schedule_lessonPlan ? JSON.parse(settings.schedule_lessonPlan) : { type: "daily", requiredCount: 2 },
@@ -163,7 +176,7 @@ function backendToState(raw) {
   });
 
   return {
-    teachers, documents, schedules, overrides,
+    teachers, documents, attendance, schedules, overrides,
     adminPin: settings.adminPin || null,
   };
 }
@@ -342,6 +355,29 @@ async function setAdminPin(pin) {
   showToast(res && res.success ? "Principal PIN updated" : "Failed to update PIN");
 }
 
+async function addAttendance(entry) {
+  const res = await apiPost({
+    action: "addAttendance",
+    teacherId: entry.teacherId,
+    class: entry.class,
+    date: entry.date,
+    total: entry.total,
+    present: entry.present,
+    absent: entry.absent,
+  });
+  if (res && res.success) {
+    const existingIdx = state.data.attendance.findIndex((a) => a.teacherId === entry.teacherId && a.date === entry.date);
+    const record = { id: res.id, teacherId: entry.teacherId, class: entry.class, date: entry.date, total: entry.total, present: entry.present, absent: entry.absent };
+    if (existingIdx >= 0) state.data.attendance[existingIdx] = record;
+    else state.data.attendance.push(record);
+    state.saveError = "";
+  } else {
+    state.saveError = "Could not save attendance. Please try again.";
+  }
+  render();
+  showToast(res && res.success ? "Attendance saved" : "Failed to save attendance");
+}
+
 async function saveComment(docId, commentText) {
   const res = await apiPost({ action: "setComment", docId, comment: commentText });
   if (res && res.success) {
@@ -425,7 +461,8 @@ function render() {
           ${state.session
             ? `<button class="btn btn-ghost" data-action="logout">↩ Log out</button>`
             : `
-              <button class="btn btn-ghost" data-action="open-teacher-login">🔓 Teacher</button>
+              <button class="btn btn-ghost" data-action="set-view" data-view="home">🏠 Home</button>
+              <button class="btn btn-ghost" data-action="open-teacher-login">🔓 I'm a Teacher</button>
               <button class="btn ${state.adminMode ? "btn-accent" : "btn-ghost"}" data-action="toggle-admin">🛡 ${state.adminMode ? "Admin Mode: On" : "Admin Mode"}</button>
             `}
         </div>
@@ -434,6 +471,7 @@ function render() {
     <main>
       ${state.saveError ? `<div class="error-banner">${esc(state.saveError)}</div>` : ""}
       ${state.adminMode && !state.session && state.view !== "folder" ? renderTabs() : ""}
+      ${state.view === "home" ? renderHome() : ""}
       ${state.view === "directory" ? renderDirectory() : ""}
       ${state.view === "dashboard" && state.adminMode ? renderDashboard() : ""}
       ${state.view === "folder" && activeTeacher ? renderFolder(activeTeacher) : ""}
@@ -446,6 +484,7 @@ function render() {
 function renderTabs() {
   return `
     <div class="tabs">
+      <button class="btn btn-tab ${state.view === "home" ? "active" : ""}" data-action="set-view" data-view="home">🏠 Home</button>
       <button class="btn btn-tab ${state.view === "directory" ? "active" : ""}" data-action="set-view" data-view="directory">Directory</button>
       <button class="btn btn-tab ${state.view === "dashboard" ? "active" : ""}" data-action="set-view" data-view="dashboard">📊 Dashboard</button>
     </div>
@@ -469,6 +508,27 @@ function renderEmptyState() {
       <div class="empty-title serif">No teachers added yet</div>
       <div class="empty-sub">${state.adminMode ? "Add your first teacher to start building the directory." : "Turn on Admin Mode to add teachers."}</div>
       ${state.adminMode ? `<button class="btn btn-dark" data-action="open-add-teacher">➕ Add Teacher</button>` : ""}
+    </div>
+  `;
+}
+
+function renderHome() {
+  return `
+    <div class="home-hero">
+      <h2 class="serif" style="font-size:22px; margin:0 0 6px; color:#1e2733;">Kyidsa Primary School Portal</h2>
+      <div style="font-size:13.5px; color:#45526b; margin-bottom:18px;">Everything the school needs, in one place.</div>
+      <button class="btn btn-dark" data-action="set-view" data-view="directory">👩‍🏫 Go to Teacher Directory</button>
+    </div>
+
+    <div class="doc-section" style="margin-top:22px;">
+      <div class="doc-section-head"><span>Important Links</span></div>
+      ${PORTFOLIO_LINKS.map((link) => `
+        <a class="doc-row link-row" href="${esc(link.url)}" target="_blank" rel="noopener">
+          <span style="font-size:16px;">${link.icon}</span>
+          <span style="flex:1;">${esc(link.label)}</span>
+          <span style="color:#9aa2b1;">↗</span>
+        </a>
+      `).join("")}
     </div>
   `;
 }
@@ -536,6 +596,27 @@ function renderDashboard() {
         <thead><tr><th>Teacher</th><th>Lesson Plan</th><th>Other Documents</th><th></th></tr></thead>
         <tbody>
           ${data.teachers.length === 0 ? `<tr><td colspan="4" style="color:#9A8F72; text-align:center; padding:20px;">No teachers yet.</td></tr>` : rows}
+        </tbody>
+      </table>
+    </div>
+
+    <h3 class="serif" style="font-size:16px; margin:26px 0 10px; color:#4A3B22;">Attendance — latest by class</h3>
+    <div class="dash-table-wrap">
+      <table>
+        <thead><tr><th>Teacher</th><th>Class</th><th>Latest Date</th><th>Present / Total</th></tr></thead>
+        <tbody>
+          ${data.teachers.length === 0 ? `<tr><td colspan="4" style="color:#9A8F72; text-align:center; padding:20px;">No teachers yet.</td></tr>` : data.teachers.map((t) => {
+            const records = data.attendance.filter((a) => a.teacherId === t.id).sort((a, b) => (a.date < b.date ? 1 : -1));
+            const latest = records[0];
+            return `
+              <tr>
+                <td style="font-weight:600;">${esc(t.name)}</td>
+                <td>${latest ? esc(latest.class || "—") : "—"}</td>
+                <td>${latest ? fmtDate(latest.date) : "No entries yet"}</td>
+                <td>${latest ? `${latest.present}/${latest.total} (${latest.total > 0 ? Math.round((latest.present / latest.total) * 100) : 0}%)` : "—"}</td>
+              </tr>
+            `;
+          }).join("")}
         </tbody>
       </table>
     </div>
@@ -610,8 +691,9 @@ function renderFolder(teacher) {
   const canUpload = !!state.session && state.session.teacherId === teacher.id;
   const showBack = !state.session;
 
-  const lessonPlans = documents.filter((d) => d.category === "lessonPlan");
-  const otherDocs = documents.filter((d) => d.category === "otherDocuments");
+  const byNewest = (a, b) => (new Date(a.uploadedAt) < new Date(b.uploadedAt) ? 1 : -1);
+  const lessonPlans = documents.filter((d) => d.category === "lessonPlan").sort(byNewest);
+  const otherDocs = documents.filter((d) => d.category === "otherDocuments").sort(byNewest);
 
   const lpStatus = getStatus(state.data, teacher.id, "lessonPlan", state.today);
   const odStatus = getStatus(state.data, teacher.id, "otherDocuments", state.today);
@@ -635,9 +717,74 @@ function renderFolder(teacher) {
     </div>
 
     ${canUpload ? renderUploadBox() : ""}
+    ${canUpload ? renderAttendanceBox(teacher) : ""}
+    ${renderAttendanceHistory(teacher)}
 
     ${docSectionHtml("Lesson Plans", lessonPlans, isPrincipal, false)}
     ${docSectionHtml("Other Documents", otherDocs, isPrincipal, true)}
+  `;
+}
+
+function todayIso() {
+  const t = state.today;
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+}
+
+function renderAttendanceBox(teacher) {
+  const todayStr = todayIso();
+  const existing = state.data.attendance.find((a) => a.teacherId === teacher.id && a.date === todayStr);
+  return `
+    <div class="upload-box">
+      <div class="title">Attendance ${existing ? "— already submitted for today, editing will update it" : ""}</div>
+      <div class="upload-row">
+        <div class="upload-field">
+          <label>Date</label>
+          <input type="date" id="att-date" value="${todayStr}" />
+        </div>
+        <div class="upload-field">
+          <label>Class</label>
+          <input type="text" id="att-class" value="${esc(teacher.subject || "")}" placeholder="e.g. Class III" />
+        </div>
+        <div class="upload-field">
+          <label>Total students</label>
+          <input type="number" min="0" id="att-total" value="${existing ? existing.total : ""}" />
+        </div>
+        <div class="upload-field">
+          <label>Present</label>
+          <input type="number" min="0" id="att-present" value="${existing ? existing.present : ""}" />
+        </div>
+        <div class="upload-field">
+          <label>Absent</label>
+          <input type="number" min="0" id="att-absent" value="${existing ? existing.absent : ""}" />
+        </div>
+        <button class="btn btn-dark" data-action="submit-attendance" data-id="${teacher.id}">✅ Save Attendance</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderAttendanceHistory(teacher) {
+  const records = state.data.attendance
+    .filter((a) => a.teacherId === teacher.id)
+    .sort((a, b) => (a.date < b.date ? 1 : -1))
+    .slice(0, 30);
+
+  return `
+    <div class="doc-section">
+      <div class="doc-section-head">
+        <span style="font-weight:700; font-size:15px;">Attendance History</span>
+        <span class="count">(${records.length})</span>
+      </div>
+      ${records.length === 0 ? `<div class="doc-empty">No attendance recorded yet.</div>` : records.map((a) => {
+        const rate = a.total > 0 ? Math.round((a.present / a.total) * 100) : 0;
+        return `
+          <div class="doc-row">
+            <span style="flex:1;">📋 ${fmtDate(a.date)} ${a.class ? `— ${esc(a.class)}` : ""}</span>
+            <span class="date">${a.present}/${a.total} present (${rate}%)</span>
+          </div>
+        `;
+      }).join("")}
+    </div>
   `;
 }
 
@@ -923,6 +1070,22 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
     if (action === "delete-doc") return removeDocument(el.dataset.id);
+
+    if (action === "submit-attendance") {
+      const teacherId = el.dataset.id;
+      const date = document.getElementById("att-date").value;
+      const cls = document.getElementById("att-class").value.trim();
+      const total = Number(document.getElementById("att-total").value);
+      const present = Number(document.getElementById("att-present").value);
+      const absent = Number(document.getElementById("att-absent").value);
+      if (!date) { alert("Please pick a date."); return; }
+      if (!Number.isFinite(total) || !Number.isFinite(present) || !Number.isFinite(absent)) {
+        alert("Please fill in Total, Present, and Absent as numbers.");
+        return;
+      }
+      await addAttendance({ teacherId, class: cls, date, total, present, absent });
+      return;
+    }
 
     if (action === "cancel-staged-upload") {
       state.pendingUpload = null;
