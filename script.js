@@ -372,7 +372,7 @@ async function addAttendance(entry) {
     else state.data.attendance.push(record);
     state.saveError = "";
   } else {
-    state.saveError = "Could not save attendance. Please try again.";
+    state.saveError = "Could not save attendance: " + (res && res.error ? res.error : "unknown error, please try again.");
   }
   render();
   showToast(res && res.success ? "Attendance saved" : "Failed to save attendance");
@@ -388,7 +388,7 @@ async function saveComment(docId, commentText) {
     }
     state.saveError = "";
   } else {
-    state.saveError = "Could not save feedback. Please try again.";
+    state.saveError = "Could not save feedback: " + (res && res.error ? res.error : "unknown error, please try again.");
   }
   render();
   showToast(res && res.success ? "Feedback saved" : "Failed to save feedback");
