@@ -169,11 +169,71 @@ main { max-width: 980px; margin: 0 auto; padding: 24px 20px 60px; }
 .doc-row .del { background: transparent; border: none; color: #7c1d2e; padding: 4px; }
 
 .doc-item { margin-bottom: 10px; }
-.home-hero {
-  background: rgba(255,255,255,0.55);
-  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(255,255,255,0.6); border-radius: 14px; padding: 24px;
-  box-shadow: 0 8px 24px rgba(20,33,61,0.1); text-align: center;
+.sky-hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: 18px;
+  padding: 54px 20px 62px;
+  text-align: center;
+  color: #ffffff;
+  background: linear-gradient(180deg, #0a1530 0%, #142449 40%, #29406f 72%, #4b5f92 100%);
+  box-shadow: 0 20px 50px rgba(10,21,48,0.4), 0 1px 2px rgba(10,21,48,0.4);
+}
+.sky-stars { position: absolute; inset: 0; overflow: hidden; }
+.star {
+  position: absolute; background: #ffffff; border-radius: 50%;
+  box-shadow: 0 0 4px rgba(255,255,255,0.85);
+  animation-name: twinkle; animation-timing-function: ease-in-out; animation-iteration-count: infinite;
+}
+@keyframes twinkle { 0%, 100% { opacity: 0.15; } 50% { opacity: 1; } }
+
+.moon {
+  position: absolute; top: 22px; right: 34px; width: 44px; height: 44px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #fffaf0 0%, #eee2b8 55%, #cdbf8c 100%);
+  box-shadow: 0 0 26px rgba(255,248,220,0.55);
+}
+
+.cloud {
+  position: absolute; background: rgba(255,255,255,0.18); border-radius: 60px; filter: blur(0.5px);
+  animation-name: drift-cloud; animation-timing-function: linear; animation-iteration-count: infinite;
+}
+.cloud::before, .cloud::after { content: ""; position: absolute; background: inherit; border-radius: 50%; }
+.cloud-1 { width: 110px; height: 30px; top: 24%; animation-duration: 42s; }
+.cloud-1::before { width: 54px; height: 54px; top: -26px; left: 12px; }
+.cloud-1::after { width: 40px; height: 40px; top: -16px; left: 56px; }
+.cloud-2 { width: 80px; height: 22px; top: 52%; animation-duration: 58s; animation-delay: -14s; }
+.cloud-2::before { width: 38px; height: 38px; top: -18px; left: 8px; }
+.cloud-2::after { width: 28px; height: 28px; top: -11px; left: 40px; }
+.cloud-3 { width: 130px; height: 32px; top: 68%; animation-duration: 50s; animation-delay: -28s; }
+.cloud-3::before { width: 58px; height: 58px; top: -28px; left: 16px; }
+.cloud-3::after { width: 46px; height: 46px; top: -18px; left: 66px; }
+@keyframes drift-cloud { from { left: -25%; } to { left: 115%; } }
+
+.sky-content { position: relative; z-index: 2; }
+
+.home-actions {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-top: 18px;
+}
+.action-card {
+  display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center;
+  background: rgba(255,255,255,0.55); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255,255,255,0.6); border-radius: 14px; padding: 22px 16px;
+  box-shadow: 0 8px 24px rgba(20,33,61,0.1); cursor: pointer; font-family: inherit;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.action-card:hover { transform: translateY(-2px); box-shadow: 0 12px 30px rgba(20,33,61,0.16); }
+.action-icon { font-size: 26px; }
+.action-label { font-family: 'Fraunces', serif; font-weight: 700; font-size: 15.5px; color: #14213d; }
+.action-sub { font-size: 12px; color: #45526b; }
+
+.form-modal-box { max-width: 640px; }
+.form-embed-wrap {
+  border-radius: 10px; overflow: hidden; background: #ffffff; box-shadow: 0 4px 14px rgba(20,33,61,0.15);
+}
+.form-embed-wrap iframe { display: block; border: none; width: 100%; }
+
+@media (prefers-reduced-motion: reduce) {
+  .star, .cloud { animation: none !important; opacity: 0.6; }
 }
 .link-row { cursor: pointer; }
 .link-row:hover { text-decoration: none; }
