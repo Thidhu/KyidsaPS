@@ -425,7 +425,7 @@ function render() {
           ${state.session
             ? `<button class="btn btn-ghost" data-action="logout">↩ Log out</button>`
             : `
-              <button class="btn btn-ghost" data-action="open-teacher-login">🔓 I'm a Teacher</button>
+              <button class="btn btn-ghost" data-action="open-teacher-login">🔓 Teacher</button>
               <button class="btn ${state.adminMode ? "btn-accent" : "btn-ghost"}" data-action="toggle-admin">🛡 ${state.adminMode ? "Admin Mode: On" : "Admin Mode"}</button>
             `}
         </div>
