@@ -2,6 +2,11 @@
 // PASTE YOUR APPS SCRIPT WEB APP URL HERE (from Deploy > New deployment)
 const BACKEND_URL = "https://script.google.com/macros/s/AKfycbwg8Ewe8O2fyb_HN87zvKafdLiPRdMNCrwd2b6-2Q_3rQ1xYRKZCA4qWUDkHZIO4zlcTw/exec";
 
+// Put your logo file (e.g. "images/logo.png") in your images folder, then update
+// this path if needed. If the file is missing, the logo just quietly doesn't show —
+// nothing breaks.
+const LOGO_URL = "images/logo.png";
+
 const CATEGORY_LABEL = { lessonPlan: "Lesson Plan", otherDocuments: "Other Document" };
 
 // Edit these to point at your actual links — shown on the Home page
@@ -164,6 +169,53 @@ function fmtDate(d) {
 function esc(str) {
   if (str == null) return "";
   return String(str).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// ---------- Attendance daily summary ----------
+// Google Forms writes Timestamp as "dd/mm/yyyy hh:mm:ss" (sheet locale), which plain
+// `new Date()` misreads in most browsers (it expects mm/dd/yyyy). Parse it explicitly.
+function parseSheetTimestamp(str) {
+  if (!str) return null;
+  const m = String(str).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})[\s,]+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (m) {
+    const [, d, mo, y, h, mi, s] = m;
+    return new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(mi), Number(s || 0));
+  }
+  const fallback = new Date(str);
+  return isNaN(fallback) ? null : fallback;
+}
+
+function isSameLocalDay(a, b) {
+  return !!a && !!b && a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+// Form questions are stored as "3. No. of Total Students" etc — the leading number can
+// shift if the form is edited, so match by keyword rather than an exact header string.
+function findColumnKey(rows, regex) {
+  for (const r of rows) {
+    const key = Object.keys(r).find((k) => regex.test(k));
+    if (key) return key;
+  }
+  return null;
+}
+
+// Filters attendance rows down to today's submissions only, and sums Present/Absent/Total
+// across every class that submitted today (each class submits its own row).
+function getTodaysAttendance(rows, today) {
+  const tsCol = findColumnKey(rows, /timestamp/i);
+  const todayRows = tsCol ? rows.filter((r) => isSameLocalDay(parseSheetTimestamp(r[tsCol]), today)) : rows;
+
+  const presentCol = findColumnKey(rows, /present/i);
+  const absentCol = findColumnKey(rows, /absent/i);
+  const totalCol = findColumnKey(rows, /total.*student/i);
+  const sumCol = (col) => (col ? todayRows.reduce((acc, r) => acc + (Number(r[col]) || 0), 0) : null);
+
+  return {
+    todayRows,
+    presentTotal: sumCol(presentCol),
+    absentTotal: sumCol(absentCol),
+    totalStudents: sumCol(totalCol),
+  };
 }
 
 // ---------- Backend communication ----------
@@ -494,9 +546,12 @@ function render() {
   app.innerHTML = `
     <header class="top">
       <div class="header-inner">
-        <div>
-          <div class="school-name serif">Kyidsa Primary School</div>
-          <div class="school-sub">${state.session ? `Signed in as ${esc(activeTeacher?.name || "")}` : "Teacher Records &amp; Directory"}</div>
+        <div class="header-brand">
+          <img class="header-logo" src="${esc(LOGO_URL)}" alt="Kyidsa Primary School logo" onerror="this.style.display='none'" />
+          <div>
+            <div class="school-name serif">Kyidsa Primary School</div>
+            <div class="school-sub">${state.session ? `Signed in as ${esc(activeTeacher?.name || "")}` : "Teacher Records &amp; Directory"}</div>
+          </div>
         </div>
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
           ${state.session
@@ -616,12 +671,12 @@ function otherDocsPillHtml(status) {
   return `<span class="pill pill-ok">✅ On track</span>`;
 }
 
-function renderResponseTable(title, icon, rows) {
+function renderResponseTable(title, icon, rows, emptyMessage) {
   if (!rows || rows.length === 0) {
     return `
       <div class="doc-section" style="margin-top:22px;">
         <div class="doc-section-head"><span>${icon} ${esc(title)}</span></div>
-        <div class="doc-empty">No responses yet. Once the linked Google Form receives submissions, they'll show up here.</div>
+        <div class="doc-empty">${esc(emptyMessage || "No responses yet. Once the linked Google Form receives submissions, they'll show up here.")}</div>
       </div>
     `;
   }
@@ -632,7 +687,10 @@ function renderResponseTable(title, icon, rows) {
   rows.forEach((r) => Object.keys(r).forEach((k) => { if (!colSet.includes(k)) colSet.push(k); }));
   const tsCol = colSet.find((c) => /timestamp/i.test(c));
   const cols = tsCol ? [tsCol, ...colSet.filter((c) => c !== tsCol)] : colSet;
-  const sorted = tsCol ? [...rows].sort((a, b) => new Date(b[tsCol]) - new Date(a[tsCol])) : [...rows].reverse();
+  const compactRegex = /timestamp|\bday\b/i;
+  const sorted = tsCol
+    ? [...rows].sort((a, b) => (parseSheetTimestamp(b[tsCol]) || 0) - (parseSheetTimestamp(a[tsCol]) || 0))
+    : [...rows].reverse();
   const shown = sorted.slice(0, 100);
 
   return `
@@ -643,9 +701,9 @@ function renderResponseTable(title, icon, rows) {
       </div>
       <div class="dash-table-wrap" style="overflow-x:auto;">
         <table>
-          <thead><tr>${cols.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead>
+          <thead><tr>${cols.map((c) => `<th class="${compactRegex.test(c) ? "col-compact" : ""}">${esc(c)}</th>`).join("")}</tr></thead>
           <tbody>
-            ${shown.map((r) => `<tr>${cols.map((c) => `<td>${esc(r[c] ?? "")}</td>`).join("")}</tr>`).join("")}
+            ${shown.map((r) => `<tr>${cols.map((c) => `<td class="${compactRegex.test(c) ? "col-compact" : ""}">${esc(r[c] ?? "")}</td>`).join("")}</tr>`).join("")}
           </tbody>
         </table>
       </div>
@@ -653,8 +711,31 @@ function renderResponseTable(title, icon, rows) {
   `;
 }
 
+function renderAttendanceSummary(summary) {
+  const has = summary.presentTotal !== null || summary.absentTotal !== null;
+  if (!has) return "";
+  return `
+    <div class="attendance-summary">
+      <div class="summary-chip summary-present">
+        <span class="summary-value">${summary.presentTotal ?? "—"}</span>
+        <span class="summary-label">Present Today</span>
+      </div>
+      <div class="summary-chip summary-absent">
+        <span class="summary-value">${summary.absentTotal ?? "—"}</span>
+        <span class="summary-label">Absent Today</span>
+      </div>
+      ${summary.totalStudents !== null ? `
+      <div class="summary-chip summary-total">
+        <span class="summary-value">${summary.totalStudents}</span>
+        <span class="summary-label">Total Students</span>
+      </div>` : ""}
+    </div>
+  `;
+}
+
 function renderDashboard() {
   const data = state.data;
+  const attendanceToday = getTodaysAttendance(data.attendanceResponses, state.today);
   const rows = data.teachers.map((t) => {
     const lp = getStatus(data, t.id, "lessonPlan", state.today);
     const od = getStatus(data, t.id, "otherDocuments", state.today);
@@ -691,7 +772,8 @@ function renderDashboard() {
       </table>
     </div>
 
-    ${renderResponseTable("Attendance Responses", "📋", data.attendanceResponses)}
+    ${renderAttendanceSummary(attendanceToday)}
+    ${renderResponseTable("Attendance — Today", "📋", attendanceToday.todayRows, "No attendance submitted yet today.")}
     ${renderResponseTable("TOD Reports", "📝", data.todResponses)}
   `;
 }
