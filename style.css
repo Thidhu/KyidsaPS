@@ -10,9 +10,9 @@ body {
 
 .page-bg {
   position: fixed; inset: 0; z-index: -2;
-  background-image: linear-gradient(rgba(6,12,28,0.10), rgba(6,12,28,0.12)), url('images/school-bg.jpg');
+  background-image: linear-gradient(rgba(6,12,28,0.62), rgba(6,12,28,0.72)), url('images/school-bg.jpg');
   background-size: cover; background-position: center;
-  filter: blur(2px);
+  filter: blur(5px);
   transform: scale(1.08); /* hide blurred edge fringe */
   opacity: 0;
   transition: opacity 0.25s ease;
@@ -120,7 +120,7 @@ header.top {
 }
 .header-brand { display: flex; align-items: center; gap: 14px; }
 .header-logo {
-  width: 80px; height: 80px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
+  width: 52px; height: 52px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
   background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.35);
   box-shadow: 0 4px 14px rgba(0,0,0,0.25);
 }
@@ -252,6 +252,16 @@ main { max-width: 980px; margin: 0 auto; padding: 24px 20px 60px; animation: vie
   animation-name: twinkle; animation-timing-function: ease-in-out; animation-iteration-count: infinite;
 }
 @keyframes twinkle { 0%, 100% { opacity: 0.15; } 50% { opacity: 1; } }
+
+.out-of-station-banner {
+  margin-top: 18px; padding: 14px 18px; border-radius: 14px;
+  background: rgba(124,29,46,0.12); border: 1px solid rgba(124,29,46,0.28);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+}
+.oos-title { font-family: 'Fraunces', serif; font-weight: 700; font-size: 14px; color: #7c1d2e; margin-bottom: 6px; }
+.oos-row { font-size: 13.5px; color: #4a2126; margin: 3px 0; }
+.oos-row strong { font-weight: 700; }
+.oos-dates { color: #7c1d2e; font-weight: 600; }
 
 .home-actions {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-top: 18px;
