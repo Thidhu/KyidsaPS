@@ -2,6 +2,11 @@
 // PASTE YOUR APPS SCRIPT WEB APP URL HERE (from Deploy > New deployment)
 const BACKEND_URL = "https://script.google.com/macros/s/AKfycbwg8Ewe8O2fyb_HN87zvKafdLiPRdMNCrwd2b6-2Q_3rQ1xYRKZCA4qWUDkHZIO4zlcTw/exec";
 
+// Put your welcome sound file (e.g. "audio/welcome.mp3") in your project folder,
+// then update this path if needed. If the file is missing, playback just silently
+// fails — nothing breaks.
+const AUDIO_URL = "audio/welcome.mp3";
+
 // Put your logo file (e.g. "images/logo.png") in your images folder, then update
 // this path if needed. If the file is missing, the logo just quietly doesn't show —
 // nothing breaks.
@@ -22,6 +27,7 @@ const PORTFOLIO_LINKS = [
 // share that sheet only with the principal to keep it principal-only viewing.
 const ATTENDANCE_FORM_URL = "https://forms.gle/zdDsEDyXt71dFQGf8";
 const TOD_FORM_URL = "https://forms.gle/9cC3tdPFxaXDSkJi8";
+const LEAVE_FORM_URL = "https://forms.gle/Jd2uMd6SsejbuMue8";
 
 function emptyData() {
   return {
@@ -35,6 +41,7 @@ function emptyData() {
     adminPin: null,
     attendanceResponses: [],
     todResponses: [],
+    leaveResponses: [],
   };
 }
 
@@ -52,6 +59,7 @@ const state = {
   today: new Date(),
   busyUpload: false,
   pendingUpload: null, // { category, docName, fileName, mimeType, dataUrl } — staged, not yet submitted
+  audioMuted: false,
 };
 
 // ---------- Decorative page-wide twinkling stars (injected once, lives outside #app so re-renders don't touch it) ----------
@@ -72,6 +80,46 @@ function initPageStars() {
   if (el) el.innerHTML = generateStarsHtml(70);
 }
 initPageStars();
+
+// ---------- Welcome sound (plays once on open; toggled via the header speaker button) ----------
+const AUDIO_MUTE_KEY = "kyidsaAudioMuted_v1";
+
+function initAudio() {
+  const audio = document.getElementById("bg-audio");
+  if (!audio) return;
+  audio.src = AUDIO_URL;
+  audio.volume = 0.55;
+
+  let savedMute = null;
+  try { savedMute = localStorage.getItem(AUDIO_MUTE_KEY); } catch (e) { /* ignore */ }
+  state.audioMuted = savedMute === "1";
+  if (state.audioMuted) return;
+
+  audio.play().catch(() => {
+    // Most browsers block autoplay-with-sound until the visitor interacts with the
+    // page at least once — fall back to starting it on their first tap/click/key.
+    const startOnInteract = () => {
+      if (!state.audioMuted) audio.play().catch(() => {});
+      document.removeEventListener("click", startOnInteract);
+      document.removeEventListener("keydown", startOnInteract);
+      document.removeEventListener("touchstart", startOnInteract);
+    };
+    document.addEventListener("click", startOnInteract, { once: true });
+    document.addEventListener("keydown", startOnInteract, { once: true });
+    document.addEventListener("touchstart", startOnInteract, { once: true });
+  });
+}
+
+function toggleAudio() {
+  state.audioMuted = !state.audioMuted;
+  try { localStorage.setItem(AUDIO_MUTE_KEY, state.audioMuted ? "1" : "0"); } catch (e) { /* ignore */ }
+  const audio = document.getElementById("bg-audio");
+  if (audio) {
+    if (state.audioMuted) audio.pause();
+    else audio.play().catch(() => {});
+  }
+  render();
+}
 
 // Drive's "uc?export=view" links are slow and sometimes show an interstitial page.
 // The "thumbnail" endpoint is much faster and more reliable for <img> display.
@@ -218,6 +266,60 @@ function getTodaysAttendance(rows, today) {
   };
 }
 
+// ---------- Leave requests ----------
+// Leave rows have no built-in unique ID (Form-linked sheets don't have one), so we
+// build a stable one from Timestamp + Name — unique enough for a single school.
+function leaveRowId(row, tsCol, nameCol) {
+  const raw = `${row[tsCol] || ""}_${row[nameCol] || ""}`;
+  return raw.replace(/[^a-zA-Z0-9]+/g, "_").slice(0, 80);
+}
+
+function leaveCols(rows) {
+  return {
+    tsCol: findColumnKey(rows, /timestamp/i),
+    nameCol: findColumnKey(rows, /name/i),
+    startCol: findColumnKey(rows, /start/i),
+    endCol: findColumnKey(rows, /end/i),
+    reasonCol: findColumnKey(rows, /reason/i),
+  };
+}
+
+// Approved leaves whose date range covers today (inclusive of both start & end dates).
+function getTeachersOnLeaveToday(leaveResponses, leaveStatuses, today) {
+  if (!leaveResponses || leaveResponses.length === 0) return [];
+  const { tsCol, nameCol, startCol, endCol } = leaveCols(leaveResponses);
+  if (!nameCol || !startCol || !endCol) return [];
+  const t = startOfDay(today);
+  const out = [];
+  leaveResponses.forEach((row) => {
+    const id = leaveRowId(row, tsCol, nameCol);
+    if (leaveStatuses[id] !== "approved") return;
+    const start = parseSheetTimestamp(row[startCol]);
+    const end = parseSheetTimestamp(row[endCol]);
+    if (!start || !end) return;
+    const s = startOfDay(start);
+    const e = startOfDay(end);
+    if (t >= s && t <= e) out.push({ name: row[nameCol], start: s, end: e });
+  });
+  return out;
+}
+
+// Approved/rejected leave decisions for one teacher that they haven't seen yet —
+// matched by name against the Leave form's "Name" answer.
+function getTeacherLeaveNotices(teacher, leaveResponses, leaveStatuses, leaveSeen) {
+  if (!teacher || !leaveResponses || leaveResponses.length === 0) return [];
+  const { tsCol, nameCol, startCol, endCol } = leaveCols(leaveResponses);
+  if (!nameCol) return [];
+  const teacherName = String(teacher.name || "").trim().toLowerCase();
+  return leaveResponses
+    .filter((row) => String(row[nameCol] || "").trim().toLowerCase() === teacherName)
+    .map((row) => {
+      const id = leaveRowId(row, tsCol, nameCol);
+      return { id, status: leaveStatuses[id], start: row[startCol], end: row[endCol] };
+    })
+    .filter((n) => (n.status === "approved" || n.status === "rejected") && leaveSeen[n.id] !== "true");
+}
+
 // ---------- Backend communication ----------
 async function apiGet() {
   const res = await fetch(BACKEND_URL);
@@ -249,6 +351,8 @@ function backendToState(raw) {
   };
 
   const overrides = {};
+  const leaveStatuses = {};
+  const leaveSeen = {};
   Object.keys(settings).forEach((k) => {
     if (k.startsWith("override_") && settings[k]) {
       const rest = k.slice("override_".length);
@@ -256,6 +360,10 @@ function backendToState(raw) {
       const teacherId = rest.slice(0, idx);
       const category = rest.slice(idx + 1);
       overrides[`${teacherId}:${category}`] = settings[k];
+    } else if (k.startsWith("leave_status_")) {
+      leaveStatuses[k.slice("leave_status_".length)] = settings[k];
+    } else if (k.startsWith("leave_seen_")) {
+      leaveSeen[k.slice("leave_seen_".length)] = settings[k];
     }
   });
 
@@ -264,6 +372,8 @@ function backendToState(raw) {
     adminPin: settings.adminPin || null,
     attendanceResponses: raw.attendanceResponses || [],
     todResponses: raw.todResponses || [],
+    leaveResponses: raw.leaveResponses || [],
+    leaveStatuses, leaveSeen,
   };
 }
 
@@ -457,6 +567,25 @@ async function setOverride(teacherId, category, dateStr) {
   showToast(res && res.success ? (dateStr ? "Custom due date set" : "Custom due date cleared") : "Failed to save");
 }
 
+async function setLeaveStatus(id, status) {
+  const key = `leave_status_${id}`;
+  const res = await apiPost({ action: "setSetting", key, value: status });
+  if (res && res.success) {
+    state.data.leaveStatuses[id] = status;
+    state.saveError = "";
+  } else {
+    state.saveError = "Could not update leave status. Please try again.";
+  }
+  render();
+  showToast(res && res.success ? `Leave ${status}` : "Failed to update leave status");
+}
+
+async function markLeaveSeen(id) {
+  const key = `leave_seen_${id}`;
+  const res = await apiPost({ action: "setSetting", key, value: "true" });
+  if (res && res.success) state.data.leaveSeen[id] = "true";
+}
+
 async function setAdminPin(pin) {
   const res = await apiPost({ action: "setSetting", key: "adminPin", value: pin });
   if (res && res.success) {
@@ -503,12 +632,14 @@ function openFolder(teacherId) {
 function handleTeacherLogin(teacherId) {
   state.session = { teacherId };
   state.modal = null;
+  const teacher = state.data.teachers.find((t) => t.id === teacherId);
   const lpStatus = getStatus(state.data, teacherId, "lessonPlan", state.today);
   const feedbackDocs = state.data.documents.filter((d) => d.teacherId === teacherId && d.comment && !d.commentSeen);
+  const leaveNotices = getTeacherLeaveNotices(teacher, state.data.leaveResponses, state.data.leaveStatuses, state.data.leaveSeen);
   openFolder(teacherId);
   const overdueItems = lpStatus.overdue ? [{ cat: "lessonPlan", status: lpStatus }] : [];
-  if (overdueItems.length > 0 || feedbackDocs.length > 0) {
-    state.modal = { type: "notice", overdueItems, feedbackDocs };
+  if (overdueItems.length > 0 || feedbackDocs.length > 0 || leaveNotices.length > 0) {
+    state.modal = { type: "notice", overdueItems, feedbackDocs, leaveNotices };
   }
   render();
 }
@@ -553,7 +684,7 @@ function render() {
             <div class="school-sub">${state.session ? `Signed in as ${esc(activeTeacher?.name || "")}` : "Teacher Records &amp; Directory"}</div>
           </div>
         </div>
-        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
           ${state.session
             ? `<button class="btn btn-ghost" data-action="logout">↩ Log out</button>`
             : `
@@ -561,6 +692,7 @@ function render() {
               <button class="btn btn-ghost" data-action="open-teacher-login">🔓 I'm a Teacher</button>
               <button class="btn ${state.adminMode ? "btn-accent" : "btn-ghost"}" data-action="toggle-admin">🛡 ${state.adminMode ? "Admin Mode: On" : "Admin Mode"}</button>
             `}
+          <button class="btn btn-ghost" data-action="toggle-audio" title="${state.audioMuted ? "Turn sound on" : "Turn sound off"}">${state.audioMuted ? "🔇" : "🔊"}</button>
         </div>
       </div>
     </header>
@@ -608,6 +740,19 @@ function renderEmptyState() {
   `;
 }
 
+function renderOutOfStationBanner() {
+  const list = getTeachersOnLeaveToday(state.data.leaveResponses, state.data.leaveStatuses, state.today);
+  if (list.length === 0) return "";
+  return `
+    <div class="out-of-station-banner">
+      <div class="oos-title">🧳 Out of Station Today</div>
+      ${list.map((p) => `
+        <div class="oos-row"><strong>${esc(p.name)}</strong> <span class="oos-dates">(${fmtDate(p.start)} &ndash; ${fmtDate(p.end)})</span></div>
+      `).join("")}
+    </div>
+  `;
+}
+
 function renderHome() {
   return `
     <div class="hero-panel">
@@ -615,6 +760,8 @@ function renderHome() {
       <div style="font-size:13.5px; color:#dfe4f0; margin-bottom:20px;">Everything the school needs, in one place.</div>
       <button class="btn btn-ghost" data-action="set-view" data-view="directory">👩‍🏫 Go to Teacher Directory</button>
     </div>
+
+    ${renderOutOfStationBanner()}
 
     <div class="home-actions">
       <button class="action-card" data-action="open-form" data-url="${esc(ATTENDANCE_FORM_URL)}" data-title="Attendance">
@@ -626,6 +773,11 @@ function renderHome() {
         <span class="action-icon">📝</span>
         <span class="action-label">TOD Report</span>
         <span class="action-sub">Teacher on Duty — activities &amp; remarks</span>
+      </button>
+      <button class="action-card" data-action="open-form" data-url="${esc(LEAVE_FORM_URL)}" data-title="Leave Request">
+        <span class="action-icon">🧳</span>
+        <span class="action-label">Apply for Leave</span>
+        <span class="action-sub">Pending admin approval</span>
       </button>
     </div>
 
@@ -733,6 +885,68 @@ function renderAttendanceSummary(summary) {
   `;
 }
 
+function leaveStatusPillHtml(status) {
+  if (status === "approved") return `<span class="pill pill-ok">✅ Approved</span>`;
+  if (status === "rejected") return `<span class="pill pill-overdue">✖ Rejected</span>`;
+  return `<span class="pill pill-none">⏳ Pending</span>`;
+}
+
+function renderLeaveTable(rows, leaveStatuses) {
+  if (!rows || rows.length === 0) {
+    return `
+      <div class="doc-section" style="margin-top:22px;">
+        <div class="doc-section-head"><span>🧳 Leave Requests</span></div>
+        <div class="doc-empty">No leave requests yet. Once the linked Google Form receives submissions, they'll show up here.</div>
+      </div>
+    `;
+  }
+
+  const { tsCol, nameCol, startCol, endCol, reasonCol } = leaveCols(rows);
+  const sorted = tsCol
+    ? [...rows].sort((a, b) => (parseSheetTimestamp(b[tsCol]) || 0) - (parseSheetTimestamp(a[tsCol]) || 0))
+    : [...rows].reverse();
+
+  return `
+    <div class="doc-section" style="margin-top:22px;">
+      <div class="doc-section-head">
+        <span>🧳 Leave Requests</span>
+        <span class="count">(${rows.length})</span>
+      </div>
+      <div class="dash-table-wrap" style="overflow-x:auto;">
+        <table>
+          <thead><tr>
+            <th class="col-compact">Submitted</th>
+            <th>Teacher</th>
+            <th>Leave Dates</th>
+            <th>Reason</th>
+            <th>Status</th>
+            <th></th>
+          </tr></thead>
+          <tbody>
+            ${sorted.map((row) => {
+              const id = leaveRowId(row, tsCol, nameCol);
+              const status = leaveStatuses[id] || "pending";
+              return `
+                <tr>
+                  <td class="col-compact">${esc(tsCol ? row[tsCol] : "")}</td>
+                  <td style="font-weight:600;">${esc(nameCol ? row[nameCol] : "")}</td>
+                  <td>${startCol && endCol ? `${fmtDate(row[startCol])} &ndash; ${fmtDate(row[endCol])}` : "—"}</td>
+                  <td>${esc(reasonCol ? row[reasonCol] : "")}</td>
+                  <td>${leaveStatusPillHtml(status)}</td>
+                  <td style="white-space:nowrap;">
+                    <button class="btn" style="background:#dcefe1; color:#235c3b; padding:4px 8px; font-size:12px;" data-action="approve-leave" data-id="${id}">✔ Approve</button>
+                    <button class="btn" style="background:#f4dfe1; color:#7c1d2e; padding:4px 8px; font-size:12px;" data-action="reject-leave" data-id="${id}">✖ Reject</button>
+                  </td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
 function renderDashboard() {
   const data = state.data;
   const attendanceToday = getTodaysAttendance(data.attendanceResponses, state.today);
@@ -775,6 +989,7 @@ function renderDashboard() {
     ${renderAttendanceSummary(attendanceToday)}
     ${renderResponseTable("Attendance — Today", "📋", attendanceToday.todayRows, "No attendance submitted yet today.")}
     ${renderResponseTable("TOD Reports", "📝", data.todResponses)}
+    ${renderLeaveTable(data.leaveResponses, data.leaveStatuses)}
   `;
 }
 
@@ -999,7 +1214,7 @@ function renderModal() {
   if (m.type === "teacherLogin") return renderTeacherLoginModal();
   if (m.type === "adminPin") return renderAdminPinModal();
   if (m.type === "changePin") return renderChangePinModal();
-  if (m.type === "notice") return renderNoticeModal(m.overdueItems, m.feedbackDocs);
+  if (m.type === "notice") return renderNoticeModal(m.overdueItems, m.feedbackDocs, m.leaveNotices);
   if (m.type === "formEmbed") return renderFormEmbedModal(m.url, m.title);
   return "";
 }
@@ -1119,9 +1334,10 @@ function renderChangePinModal() {
   `;
 }
 
-function renderNoticeModal(overdueItems, feedbackDocs) {
+function renderNoticeModal(overdueItems, feedbackDocs, leaveNotices) {
   const hasOverdue = overdueItems && overdueItems.length > 0;
   const hasFeedback = feedbackDocs && feedbackDocs.length > 0;
+  const hasLeave = leaveNotices && leaveNotices.length > 0;
   return `
     <div class="modal-overlay">
       <div class="modal-box" data-stop-close="1" style="max-width:380px;">
@@ -1143,6 +1359,12 @@ function renderNoticeModal(overdueItems, feedbackDocs) {
               <div style="margin-top:4px;">${esc(d.comment)}</div>
             </div>
           `).join("") : ""}
+          ${hasLeave ? leaveNotices.map((n) => `
+            <div style="background:${n.status === "approved" ? "rgba(223,233,225,0.85)" : "rgba(244,223,225,0.85)"}; border-radius:9px; padding:10px 12px; font-size:13.5px; color:${n.status === "approved" ? "#1e2733" : "#7c1d2e"};">
+              <strong>${n.status === "approved" ? "✅ Leave Approved" : "❌ Leave Not Approved"}</strong>
+              <div style="margin-top:4px;">${fmtDate(n.start)} &ndash; ${fmtDate(n.end)}</div>
+            </div>
+          `).join("") : ""}
         </div>
         <button class="btn btn-dark" style="width:100%; justify-content:center;" data-action="close-notice">Got it</button>
       </div>
@@ -1153,6 +1375,7 @@ function renderNoticeModal(overdueItems, feedbackDocs) {
 // ---------- Event delegation ----------
 document.addEventListener("DOMContentLoaded", () => {
   loadData();
+  initAudio();
 
   document.getElementById("app").addEventListener("click", async (e) => {
     const overlay = e.target.closest("[data-action='modal-overlay-close']");
@@ -1183,6 +1406,9 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
     if (action === "delete-doc") return removeDocument(el.dataset.id);
+    if (action === "approve-leave") return setLeaveStatus(el.dataset.id, "approved");
+    if (action === "reject-leave") return setLeaveStatus(el.dataset.id, "rejected");
+    if (action === "toggle-audio") return toggleAudio();
 
     if (action === "open-form") {
       const url = el.dataset.url;
@@ -1235,9 +1461,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (action === "close-notice") {
       const feedbackDocs = (state.modal && state.modal.feedbackDocs) || [];
+      const leaveNotices = (state.modal && state.modal.leaveNotices) || [];
       state.modal = null;
       render();
       for (const d of feedbackDocs) await markCommentSeen(d.id);
+      for (const n of leaveNotices) await markLeaveSeen(n.id);
       return;
     }
 
