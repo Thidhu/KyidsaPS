@@ -95,6 +95,11 @@ th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: 
 .dash-table-wrap tbody tr:nth-child(even) { background: rgba(244,245,247,0.55); }
 .dash-table-wrap tbody tr:hover { background: rgba(164,131,39,0.12); }
 .dash-table-wrap tbody tr:last-child td { border-bottom: none; }
+.dash-table-wrap th.col-compact, .dash-table-wrap td.col-compact {
+  width: 1%; max-width: 100px; font-size: 11px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.dash-table-wrap td.col-compact:first-child { color: #6b7488; font-weight: 600; }
 
 /* Custom slim scrollbar for the horizontally-scrolling table wrapper */
 .dash-table-wrap [style*="overflow-x:auto"] { scrollbar-width: thin; scrollbar-color: #a48327 transparent; }
@@ -112,6 +117,12 @@ header.top {
 .header-inner {
   display: flex; justify-content: space-between; align-items: flex-start;
   max-width: 980px; margin: 0 auto; flex-wrap: wrap; gap: 12px;
+}
+.header-brand { display: flex; align-items: center; gap: 14px; }
+.header-logo {
+  width: 52px; height: 52px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
+  background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.35);
+  box-shadow: 0 4px 14px rgba(0,0,0,0.25);
 }
 .school-name { font-size: 30px; font-weight: 700; letter-spacing: 0.01em; }
 .school-sub { font-size: 13.5px; color: #b9c2d6; margin-top: 2px; letter-spacing: 0.02em; }
@@ -340,6 +351,25 @@ html { scroll-behavior: smooth; }
 .schedule-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
 .schedule-field { min-width: 110px; }
 
+.attendance-summary {
+  display: flex; gap: 12px; flex-wrap: wrap; margin: 4px 0 18px;
+}
+.summary-chip {
+  flex: 1; min-width: 130px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  padding: 14px 10px; border-radius: 14px; text-align: center;
+  background: rgba(255,255,255,0.55); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255,255,255,0.6); box-shadow: 0 8px 24px rgba(20,33,61,0.1);
+}
+.summary-value { font-family: 'Fraunces', serif; font-size: 30px; font-weight: 700; line-height: 1.1; }
+.summary-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #45526b; font-weight: 600; }
+.summary-present { border-left: 4px solid #235c3b; }
+.summary-present .summary-value { color: #235c3b; }
+.summary-absent { border-left: 4px solid #7c1d2e; }
+.summary-absent .summary-value { color: #7c1d2e; }
+.summary-total { border-left: 4px solid #a48327; }
+.summary-total .summary-value { color: #14213d; }
+
 .dash-table-wrap {
   background: rgba(255,255,255,0.6); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
   border: 1px solid rgba(255,255,255,0.6); border-radius: 14px; overflow: hidden;
@@ -355,6 +385,7 @@ html { scroll-behavior: smooth; }
 
 @media (max-width: 600px) {
   .schedule-grid { grid-template-columns: 1fr; }
+  .header-logo { width: 42px; height: 42px; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
