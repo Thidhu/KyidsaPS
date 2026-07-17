@@ -10,9 +10,9 @@ body {
 
 .page-bg {
   position: fixed; inset: 0; z-index: -2;
-  background-image: linear-gradient(rgba(6,12,28,0.62), rgba(6,12,28,0.72)), url('images/school-bg.jpg');
+  background-image: linear-gradient(rgba(6,12,28,0.10), rgba(6,12,28,0.12)), url('images/school-bg.jpg');
   background-size: cover; background-position: center;
-  filter: blur(5px);
+  filter: blur(2px);
   transform: scale(1.08); /* hide blurred edge fringe */
   opacity: 0;
   transition: opacity 0.25s ease;
@@ -120,7 +120,7 @@ header.top {
 }
 .header-brand { display: flex; align-items: center; gap: 14px; }
 .header-logo {
-  width: 52px; height: 52px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
+  width: 80px; height: 80px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
   background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.35);
   box-shadow: 0 4px 14px rgba(0,0,0,0.25);
 }
