@@ -1,6 +1,6 @@
 // ---------- Constants ----------
 // PASTE YOUR APPS SCRIPT WEB APP URL HERE (from Deploy > New deployment)
-const BACKEND_URL = "https://script.google.com/macros/s/AKfycbwHGK41o0luNY77PDSxbQE8Rb-DxDh_mxnSjnojl4CcADNBXaYwWBbMFUZMKordzGcSfQ/exec";
+const BACKEND_URL = "https://script.google.com/macros/s/AKfycbwg8Ewe8O2fyb_HN87zvKafdLiPRdMNCrwd2b6-2Q_3rQ1xYRKZCA4qWUDkHZIO4zlcTw/exec";
 
 const CATEGORY_LABEL = { lessonPlan: "Lesson Plan", otherDocuments: "Other Document" };
 
@@ -28,6 +28,8 @@ function emptyData() {
     },
     overrides: {},
     adminPin: null,
+    attendanceResponses: [],
+    todResponses: [],
   };
 }
 
@@ -47,20 +49,34 @@ const state = {
   pendingUpload: null, // { category, docName, fileName, mimeType, dataUrl } — staged, not yet submitted
 };
 
-// ---------- Decorative sky (generated once so it doesn't reshuffle on every render) ----------
+// ---------- Decorative page-wide twinkling stars (injected once, lives outside #app so re-renders don't touch it) ----------
 function generateStarsHtml(count) {
   let html = "";
   for (let i = 0; i < count; i++) {
-    const top = (Math.random() * 92).toFixed(1);
+    const top = (Math.random() * 100).toFixed(1);
     const left = (Math.random() * 100).toFixed(1);
-    const size = (Math.random() * 1.6 + 1).toFixed(1);
+    const size = (Math.random() * 1.8 + 1).toFixed(1);
     const delay = (Math.random() * 5).toFixed(2);
     const duration = (Math.random() * 2 + 2.5).toFixed(2);
     html += `<span class="star" style="top:${top}%; left:${left}%; width:${size}px; height:${size}px; animation-delay:${delay}s; animation-duration:${duration}s;"></span>`;
   }
   return html;
 }
-const SKY_STARS_HTML = generateStarsHtml(55);
+function initPageStars() {
+  const el = document.getElementById("page-stars");
+  if (el) el.innerHTML = generateStarsHtml(70);
+}
+initPageStars();
+
+// Drive's "uc?export=view" links are slow and sometimes show an interstitial page.
+// The "thumbnail" endpoint is much faster and more reliable for <img> display.
+// Works on any Drive file URL format (uc?id=, /d/ID/, open?id=) by pulling out the file ID.
+function driveThumb(url, size) {
+  if (!url) return url;
+  const match = url.match(/[?&]id=([^&]+)/) || url.match(/\/d\/([^/]+)/);
+  if (!match) return url;
+  return `https://drive.google.com/thumbnail?id=${match[1]}&sz=w${size || 200}`;
+}
 
 // ---------- Utils ----------
 function uid() {
@@ -194,17 +210,46 @@ function backendToState(raw) {
   return {
     teachers, documents, schedules, overrides,
     adminPin: settings.adminPin || null,
+    attendanceResponses: raw.attendanceResponses || [],
+    todResponses: raw.todResponses || [],
   };
+}
+
+// ---------- Local cache (so repeat visits render instantly while fresh data loads behind it) ----------
+const LOCAL_CACHE_KEY = "kyidsaPortalCache_v1";
+function readLocalCache() {
+  try {
+    const raw = localStorage.getItem(LOCAL_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) {
+    return null;
+  }
+}
+function writeLocalCache(raw) {
+  try {
+    localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(raw));
+  } catch (e) {
+    // storage full/unavailable (e.g. private browsing) — safe to ignore, just skip caching
+  }
 }
 
 // ---------- Persistence ----------
 async function loadData() {
+  const cached = readLocalCache();
+  if (cached) {
+    // Show the last-known data immediately instead of a blank loading screen,
+    // then quietly refresh with the latest from the backend below.
+    state.data = backendToState(cached);
+    state.loaded = true;
+    render();
+  }
   try {
     const raw = await apiGet();
     state.data = backendToState(raw);
     state.saveError = "";
+    writeLocalCache(raw);
   } catch (e) {
-    state.saveError = "Could not connect to the backend. Check BACKEND_URL in script.js.";
+    if (!cached) state.saveError = "Could not connect to the backend. Check BACKEND_URL in script.js.";
   } finally {
     state.loaded = true;
     render();
@@ -216,6 +261,7 @@ async function refreshData() {
     const raw = await apiGet();
     state.data = backendToState(raw);
     state.saveError = "";
+    writeLocalCache(raw);
   } catch (e) {
     state.saveError = "Could not save. Please check your connection and try again.";
   }
@@ -443,6 +489,8 @@ function render() {
 
   const activeTeacher = state.data.teachers.find((t) => t.id === state.activeTeacherId) || null;
 
+  document.body.classList.toggle("home-view", state.view === "home");
+
   app.innerHTML = `
     <header class="top">
       <div class="header-inner">
@@ -507,17 +555,10 @@ function renderEmptyState() {
 
 function renderHome() {
   return `
-    <div class="sky-hero">
-      <div class="sky-stars">${SKY_STARS_HTML}</div>
-      <div class="moon"></div>
-      <div class="cloud cloud-1"></div>
-      <div class="cloud cloud-2"></div>
-      <div class="cloud cloud-3"></div>
-      <div class="sky-content">
-        <h2 class="serif" style="font-size:24px; margin:0 0 6px;">Kyidsa Primary School Portal</h2>
-        <div style="font-size:13.5px; color:#c7d0e6; margin-bottom:20px;">Everything the school needs, in one place.</div>
-        <button class="btn btn-ghost" data-action="set-view" data-view="directory">👩‍🏫 Go to Teacher Directory</button>
-      </div>
+    <div class="hero-panel">
+      <h2 class="serif" style="font-size:24px; margin:0 0 6px;">Kyidsa Primary School Portal</h2>
+      <div style="font-size:13.5px; color:#dfe4f0; margin-bottom:20px;">Everything the school needs, in one place.</div>
+      <button class="btn btn-ghost" data-action="set-view" data-view="directory">👩‍🏫 Go to Teacher Directory</button>
     </div>
 
     <div class="home-actions">
@@ -550,7 +591,7 @@ function renderTeacherCard(t) {
   const docCount = state.data.documents.filter((d) => d.teacherId === t.id).length;
   return `
     <div class="card">
-      <div class="ring"><div class="avatar">${t.photo ? `<img src="${t.photo}" alt="${esc(t.name)}" />` : `<span class="avatar-letter">${esc((t.name || "?")[0])}</span>`}</div></div>
+      <div class="ring"><div class="avatar">${t.photo ? `<img src="${driveThumb(t.photo, 160)}" alt="${esc(t.name)}" loading="lazy" />` : `<span class="avatar-letter">${esc((t.name || "?")[0])}</span>`}</div></div>
       <div style="text-align:center;">
         <div class="card-name">${esc(t.name)}</div>
         <div class="card-subject">${esc(t.subject || "")}</div>
@@ -573,6 +614,43 @@ function otherDocsPillHtml(status) {
   if (!status.dueDate) return `<span class="pill pill-none">No schedule</span>`;
   if (status.overdue) return `<span class="pill pill-overdue">⚠ Overdue since ${fmtDate(status.dueDate)}</span>`;
   return `<span class="pill pill-ok">✅ On track</span>`;
+}
+
+function renderResponseTable(title, icon, rows) {
+  if (!rows || rows.length === 0) {
+    return `
+      <div class="doc-section" style="margin-top:22px;">
+        <div class="doc-section-head"><span>${icon} ${esc(title)}</span></div>
+        <div class="doc-empty">No responses yet. Once the linked Google Form receives submissions, they'll show up here.</div>
+      </div>
+    `;
+  }
+
+  // Union of columns across all response rows (Form questions can vary slightly row to row).
+  // Timestamp — if present — is always shown first, newest response on top.
+  const colSet = [];
+  rows.forEach((r) => Object.keys(r).forEach((k) => { if (!colSet.includes(k)) colSet.push(k); }));
+  const tsCol = colSet.find((c) => /timestamp/i.test(c));
+  const cols = tsCol ? [tsCol, ...colSet.filter((c) => c !== tsCol)] : colSet;
+  const sorted = tsCol ? [...rows].sort((a, b) => new Date(b[tsCol]) - new Date(a[tsCol])) : [...rows].reverse();
+  const shown = sorted.slice(0, 100);
+
+  return `
+    <div class="doc-section" style="margin-top:22px;">
+      <div class="doc-section-head">
+        <span>${icon} ${esc(title)}</span>
+        <span class="count">(${rows.length}${rows.length > 100 ? " — showing latest 100" : ""})</span>
+      </div>
+      <div class="dash-table-wrap" style="overflow-x:auto;">
+        <table>
+          <thead><tr>${cols.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead>
+          <tbody>
+            ${shown.map((r) => `<tr>${cols.map((c) => `<td>${esc(r[c] ?? "")}</td>`).join("")}</tr>`).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
 }
 
 function renderDashboard() {
@@ -613,14 +691,8 @@ function renderDashboard() {
       </table>
     </div>
 
-    <div class="doc-section" style="margin-top:22px;">
-      <div class="doc-section-head"><span>Attendance &amp; TOD Reports</span></div>
-      <div style="font-size:13px; color:#45526b; padding:2px 2px 10px;">
-        These are now collected through the Google Forms linked on the Home page. Open the response spreadsheet
-        attached to each form (share it only with yourself) to review them — set the form links in
-        <code>ATTENDANCE_FORM_URL</code> and <code>TOD_FORM_URL</code> near the top of script.js.
-      </div>
-    </div>
+    ${renderResponseTable("Attendance Responses", "📋", data.attendanceResponses)}
+    ${renderResponseTable("TOD Reports", "📝", data.todResponses)}
   `;
 }
 
@@ -703,7 +775,7 @@ function renderFolder(teacher) {
     ${showBack ? `<button class="btn btn-plain" data-action="back-to-directory">⬅ Back to directory</button>` : ""}
 
     <div class="folder-header">
-      <div class="ring"><div class="avatar" style="width:64px;height:64px;">${teacher.photo ? `<img src="${teacher.photo}" alt="${esc(teacher.name)}" />` : `<span class="avatar-letter">${esc((teacher.name || "?")[0])}</span>`}</div></div>
+      <div class="ring"><div class="avatar" style="width:64px;height:64px;">${teacher.photo ? `<img src="${driveThumb(teacher.photo, 160)}" alt="${esc(teacher.name)}" loading="lazy" />` : `<span class="avatar-letter">${esc((teacher.name || "?")[0])}</span>`}</div></div>
       <div style="flex:1; min-width:160px;">
         <div class="folder-name">${esc(teacher.name)}</div>
         <div class="folder-subject">${esc(teacher.subject || "")}</div>
