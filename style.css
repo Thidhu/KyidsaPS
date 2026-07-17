@@ -10,7 +10,7 @@ body {
 
 .page-bg {
   position: fixed; inset: 0; z-index: -2;
-  background-image: linear-gradient(rgba(6,12,28,0.15), rgba(6,12,28,0.20)), url('images/school-bg.jpg');
+  background-image: linear-gradient(rgba(6,12,28,0.62), rgba(6,12,28,0.72)), url('images/school-bg.jpg');
   background-size: cover; background-position: center;
   filter: blur(5px);
   transform: scale(1.08); /* hide blurred edge fringe */
@@ -77,6 +77,30 @@ label {
 table { border-collapse: collapse; width: 100%; }
 th, td { text-align: left; padding: 10px 12px; font-size: 13.5px; border-bottom: 1px solid rgba(228,231,236,0.8); }
 th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #14213d; background: rgba(244,245,247,0.6); }
+
+/* Response tables (Attendance / TOD) — sit inside .dash-table-wrap */
+.dash-table-wrap table { font-size: 13px; }
+.dash-table-wrap thead th {
+  position: sticky; top: 0; z-index: 1;
+  background: linear-gradient(135deg, #1c2d52 0%, #14213d 100%);
+  color: #e8ecf5; font-size: 10.5px; padding: 11px 14px;
+  border-bottom: 2px solid #a48327;
+}
+.dash-table-wrap thead th:first-child { color: #f4d78a; } /* highlight timestamp column */
+.dash-table-wrap tbody td { padding: 10px 14px; color: #1e2733; white-space: nowrap; }
+.dash-table-wrap tbody td:first-child {
+  font-variant-numeric: tabular-nums; color: #6b7488; font-size: 12px; font-weight: 600;
+}
+.dash-table-wrap tbody tr { transition: background 0.12s ease; }
+.dash-table-wrap tbody tr:nth-child(even) { background: rgba(244,245,247,0.55); }
+.dash-table-wrap tbody tr:hover { background: rgba(164,131,39,0.12); }
+.dash-table-wrap tbody tr:last-child td { border-bottom: none; }
+
+/* Custom slim scrollbar for the horizontally-scrolling table wrapper */
+.dash-table-wrap [style*="overflow-x:auto"] { scrollbar-width: thin; scrollbar-color: #a48327 transparent; }
+.dash-table-wrap [style*="overflow-x:auto"]::-webkit-scrollbar { height: 7px; }
+.dash-table-wrap [style*="overflow-x:auto"]::-webkit-scrollbar-thumb { background: rgba(164,131,39,0.55); border-radius: 10px; }
+.dash-table-wrap [style*="overflow-x:auto"]::-webkit-scrollbar-track { background: transparent; }
 
 header.top {
   background: linear-gradient(135deg, rgba(20,33,61,0.92) 0%, rgba(28,45,82,0.92) 100%);
@@ -175,8 +199,16 @@ main { max-width: 980px; margin: 0 auto; padding: 24px 20px 60px; animation: vie
 
 .doc-section { margin-bottom: 22px; }
 .doc-section-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; color: #1e2733; font-weight: 700; }
-.doc-section-head .count { font-size: 12px; color: #9aa2b1; font-weight: 400; }
-.doc-empty { font-size: 13px; color: #9aa2b1; padding: 10px 2px; }
+.doc-section-head span:first-child { font-family: 'Fraunces', serif; font-size: 15.5px; letter-spacing: 0.01em; }
+.doc-section-head .count {
+  font-size: 11px; color: #45526b; font-weight: 600; background: rgba(20,33,61,0.07);
+  padding: 2px 9px; border-radius: 10px;
+}
+.doc-empty {
+  font-size: 13px; color: #9aa2b1; padding: 22px 16px; text-align: center;
+  background: rgba(255,255,255,0.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px dashed rgba(180,187,201,0.7); border-radius: 14px;
+}
 .doc-row {
   display: flex; align-items: center; gap: 10px;
   background: rgba(255,255,255,0.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
