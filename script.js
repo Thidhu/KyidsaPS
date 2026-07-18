@@ -312,6 +312,29 @@ function getTeachersOnLeaveToday(leaveResponses, leaveStatuses, today) {
   return out;
 }
 
+// All of this teacher's leave requests, every status, for a permanent view on their
+// own folder page (unlike getTeacherLeaveNotices, this doesn't disappear once "seen").
+function getTeacherLeaveRequests(teacher, leaveResponses, leaveStatuses) {
+  if (!teacher || !leaveResponses || leaveResponses.length === 0) return [];
+  const { tsCol, nameCol, startCol, endCol, reasonCol } = leaveCols(leaveResponses);
+  if (!nameCol) return [];
+  const teacherName = String(teacher.name || "").trim().toLowerCase();
+  return leaveResponses
+    .filter((row) => String(row[nameCol] || "").trim().toLowerCase() === teacherName)
+    .map((row) => {
+      const id = leaveRowId(row, tsCol, nameCol);
+      return {
+        id,
+        status: leaveStatuses[id] || "pending",
+        start: startCol ? row[startCol] : "",
+        end: endCol ? row[endCol] : "",
+        reason: reasonCol ? row[reasonCol] : "",
+        submittedAt: tsCol ? row[tsCol] : "",
+      };
+    })
+    .sort((a, b) => (parseSheetTimestamp(b.submittedAt) || 0) - (parseSheetTimestamp(a.submittedAt) || 0));
+}
+
 // Approved/rejected leave decisions for one teacher that they haven't seen yet —
 // matched by name against the Leave form's "Name" answer.
 function getTeacherLeaveNotices(teacher, leaveResponses, leaveStatuses, leaveSeen) {
@@ -873,20 +896,10 @@ function renderHome() {
     ${renderOutOfStationBanner()}
 
     <div class="home-actions">
-      <button class="action-card" data-action="open-form" data-url="${esc(ATTENDANCE_FORM_URL)}" data-title="Attendance">
-        <span class="action-icon">📋</span>
-        <span class="action-label">Mark Attendance</span>
-        <span class="action-sub">Daily class attendance form</span>
-      </button>
-      <button class="action-card" data-action="open-form" data-url="${esc(TOD_FORM_URL)}" data-title="TOD Report">
-        <span class="action-icon">📝</span>
-        <span class="action-label">TOD Report</span>
-        <span class="action-sub">Teacher on Duty — activities &amp; remarks</span>
-      </button>
-      <button class="action-card" data-action="open-form" data-url="${esc(LEAVE_FORM_URL)}" data-title="Leave Request">
-        <span class="action-icon">🧳</span>
-        <span class="action-label">Apply for Leave</span>
-        <span class="action-sub">Pending admin approval</span>
+      <button class="action-card" data-action="open-teacher-login">
+        <span class="action-icon">🔓</span>
+        <span class="action-label">I'm a Teacher</span>
+        <span class="action-sub">Log in for Attendance, TOD Report &amp; Leave</span>
       </button>
       <button class="action-card" data-action="open-external" data-url="${esc(TIMETABLE_GENERATOR_URL)}">
         <span class="action-icon">🗓️</span>
@@ -1276,9 +1289,12 @@ function renderFolder(teacher) {
       <div><span class="label">${CATEGORY_LABEL.otherDocuments}:</span>${otherDocsPillHtml(odStatus)}</div>
     </div>
 
+    ${canUpload ? renderTeacherServicesSection() : ""}
+
     ${canUpload ? renderUploadBox() : ""}
 
     ${renderTeacherRemarksSection(teacher)}
+    ${renderTeacherLeaveSection(teacher)}
 
     ${docSectionHtml("Lesson Plans", lessonPlans, isPrincipal, false)}
     ${docSectionHtml("Other Documents", otherDocs, isPrincipal, true)}
@@ -1299,6 +1315,50 @@ function renderTeacherRemarksSection(teacher) {
           <div class="comment-display" style="margin-top:0;"><strong>${fmtDate(r.date)}</strong> — ${esc(r.remark)}</div>
         </div>
       `).join("")}
+    </div>
+  `;
+}
+
+function renderTeacherLeaveSection(teacher) {
+  const requests = getTeacherLeaveRequests(teacher, state.data.leaveResponses, state.data.leaveStatuses);
+  if (requests.length === 0) return "";
+  return `
+    <div class="doc-section">
+      <div class="doc-section-head">
+        <span style="font-weight:700; font-size:15px;">🧳 My Leave Requests</span>
+        <span class="count">(${requests.length})</span>
+      </div>
+      ${requests.map((r) => `
+        <div class="doc-item">
+          <div class="doc-row" style="gap:10px; flex-wrap:wrap;">
+            <span style="flex:1; font-weight:600;">${r.start && r.end ? `${fmtDate(r.start)} &ndash; ${fmtDate(r.end)}` : "—"}</span>
+            ${leaveStatusPillHtml(r.status)}
+          </div>
+          ${r.reason ? `<div class="doc-meta">${esc(r.reason)}</div>` : ""}
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderTeacherServicesSection() {
+  return `
+    <div class="home-actions" style="margin-bottom:20px;">
+      <button class="action-card" data-action="open-form" data-url="${esc(ATTENDANCE_FORM_URL)}" data-title="Attendance">
+        <span class="action-icon">📋</span>
+        <span class="action-label">Mark Attendance</span>
+        <span class="action-sub">Daily class attendance form</span>
+      </button>
+      <button class="action-card" data-action="open-form" data-url="${esc(TOD_FORM_URL)}" data-title="TOD Report">
+        <span class="action-icon">📝</span>
+        <span class="action-label">TOD Report</span>
+        <span class="action-sub">Teacher on Duty — activities &amp; remarks</span>
+      </button>
+      <button class="action-card" data-action="open-form" data-url="${esc(LEAVE_FORM_URL)}" data-title="Leave Request">
+        <span class="action-icon">🧳</span>
+        <span class="action-label">Apply for Leave</span>
+        <span class="action-sub">Pending admin approval</span>
+      </button>
     </div>
   `;
 }
