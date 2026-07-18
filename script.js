@@ -1,6 +1,6 @@
 // ---------- Constants ----------
 // PASTE YOUR APPS SCRIPT WEB APP URL HERE (from Deploy > New deployment)
-const BACKEND_URL = "https://script.google.com/macros/s/AKfycbyBmvF9X7SFKUKQ-ahDpRvQCv4wScLstqxIl9FkZEcEILOrM9V9JKBFiMMZI4Bd8IDItg/exec";
+const BACKEND_URL = "https://script.google.com/macros/s/AKfycbwg8Ewe8O2fyb_HN87zvKafdLiPRdMNCrwd2b6-2Q_3rQ1xYRKZCA4qWUDkHZIO4zlcTw/exec";
 
 // Put your welcome sound file (e.g. "audio/welcome.mp3") in your project folder,
 // then update this path if needed. If the file is missing, playback just silently
@@ -157,6 +157,21 @@ function startOfDay(d) {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
   return x;
+}
+
+// Keeps rows submitted within the last `days` days (inclusive of today), by the
+// given Timestamp column. Rows with an unparseable/missing timestamp are kept
+// rather than hidden, since silently dropping them would be worse than showing
+// one extra row.
+function filterToLastNDays(rows, tsCol, today, days) {
+  if (!tsCol) return rows;
+  const cutoff = startOfDay(today);
+  cutoff.setDate(cutoff.getDate() - (days - 1));
+  return rows.filter((r) => {
+    const d = parseSheetTimestamp(r[tsCol]);
+    if (!d) return true;
+    return startOfDay(d) >= cutoff;
+  });
 }
 
 function computeCalendarDues(schedule, today) {
@@ -464,6 +479,35 @@ function writeLocalCache(raw) {
     localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(raw));
   } catch (e) {
     // storage full/unavailable (e.g. private browsing) — safe to ignore, just skip caching
+  }
+}
+
+// ---------- Persisted navigation (so a hard refresh lands back where you were,
+// e.g. deep in the admin dashboard, instead of resetting to Home) ----------
+const NAV_STATE_KEY = "kyidsaPortalNav_v1";
+function saveNavState() {
+  try {
+    localStorage.setItem(NAV_STATE_KEY, JSON.stringify({
+      view: state.view,
+      adminMode: state.adminMode,
+      activeTeacherId: state.activeTeacherId,
+      session: state.session,
+    }));
+  } catch (e) {
+    // ignore — worst case, next refresh just lands on Home like before
+  }
+}
+function restoreNavState() {
+  try {
+    const raw = localStorage.getItem(NAV_STATE_KEY);
+    if (!raw) return;
+    const nav = JSON.parse(raw);
+    if (nav.view) state.view = nav.view;
+    if (nav.adminMode) state.adminMode = true;
+    if (nav.activeTeacherId) state.activeTeacherId = nav.activeTeacherId;
+    if (nav.session) state.session = nav.session;
+  } catch (e) {
+    // ignore — falls back to the default Home view
   }
 }
 
@@ -780,6 +824,14 @@ function render() {
 
   const activeTeacher = state.data.teachers.find((t) => t.id === state.activeTeacherId) || null;
 
+  // Sanity-check a restored (persisted) view against current data/permissions —
+  // e.g. don't strand someone on "dashboard" if adminMode somehow isn't on, or
+  // on "folder" for a teacher that no longer exists.
+  if (state.view === "dashboard" && !state.adminMode) state.view = "home";
+  if (state.view === "folder" && !activeTeacher) { state.view = "home"; state.activeTeacherId = null; }
+
+  saveNavState();
+
   document.body.classList.toggle("home-view", state.view === "home");
 
   app.innerHTML = `
@@ -1025,12 +1077,23 @@ function leaveStatusPillHtml(status) {
   return `<span class="pill pill-none">⏳ Pending</span>`;
 }
 
-function renderLeaveTable(rows, leaveStatuses) {
-  if (!rows || rows.length === 0) {
+function renderLeaveTable(allRows, leaveStatuses) {
+  const { tsCol: rawTsCol } = leaveCols(allRows || []);
+  const rows = filterToLastNDays(allRows || [], rawTsCol, state.today, 5);
+
+  if (!allRows || allRows.length === 0) {
     return `
       <div class="doc-section" style="margin-top:22px;">
         <div class="doc-section-head"><span>🧳 Leave Requests</span></div>
         <div class="doc-empty">No leave requests yet. Once the linked Google Form receives submissions, they'll show up here.</div>
+      </div>
+    `;
+  }
+  if (rows.length === 0) {
+    return `
+      <div class="doc-section" style="margin-top:22px;">
+        <div class="doc-section-head"><span>🧳 Leave Requests</span></div>
+        <div class="doc-empty">No leave requests in the last 5 days.</div>
       </div>
     `;
   }
@@ -1044,7 +1107,7 @@ function renderLeaveTable(rows, leaveStatuses) {
     <div class="doc-section" style="margin-top:22px;">
       <div class="doc-section-head">
         <span>🧳 Leave Requests</span>
-        <span class="count">(${rows.length})</span>
+        <span class="count">(${rows.length} in the last 5 days)</span>
       </div>
       <div class="dash-table-wrap" style="overflow-x:auto;">
         <table>
@@ -1647,8 +1710,33 @@ function renderNoticeModal(overdueItems, feedbackDocs, leaveNotices, todRemarkNo
   `;
 }
 
+// ---------- Boot loader (purely cosmetic — always takes ~1s, independent of actual data load time) ----------
+function runBootLoader() {
+  const overlay = document.getElementById("boot-loader");
+  const percentEl = document.getElementById("boot-percent");
+  const barFill = document.getElementById("boot-bar-fill");
+  if (!overlay) return;
+  const duration = 2000;
+  const start = performance.now();
+  function tick(now) {
+    const elapsed = now - start;
+    const pct = Math.min(100, Math.round((elapsed / duration) * 100));
+    if (percentEl) percentEl.textContent = pct + "%";
+    if (barFill) barFill.style.width = pct + "%";
+    if (elapsed < duration) {
+      requestAnimationFrame(tick);
+    } else {
+      overlay.classList.add("boot-loader-hide");
+      setTimeout(() => { overlay.style.display = "none"; }, 320); // matches the CSS fade duration
+    }
+  }
+  requestAnimationFrame(tick);
+}
+
 // ---------- Event delegation ----------
 document.addEventListener("DOMContentLoaded", () => {
+  runBootLoader();
+  restoreNavState();
   loadData();
   initAudio();
 
@@ -1846,11 +1934,13 @@ document.addEventListener("DOMContentLoaded", () => {
         if (pin !== confirmPin) { state.modal.error = "PINs don't match."; return render(); }
         await setAdminPin(pin);
         state.adminMode = true;
+        state.view = "dashboard";
         state.modal = null;
         return render();
       } else {
         if (pin !== String(state.data.adminPin)) { state.modal.error = "Incorrect PIN."; return render(); }
         state.adminMode = true;
+        state.view = "dashboard";
         state.modal = null;
         return render();
       }
