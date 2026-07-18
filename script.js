@@ -47,6 +47,8 @@ function emptyData() {
     attendanceResponses: [],
     todResponses: [],
     leaveResponses: [],
+    todRemarks: {},
+    todRemarksSeen: {},
     timetableUrl: null,
   };
 }
@@ -326,7 +328,40 @@ function getTeacherLeaveNotices(teacher, leaveResponses, leaveStatuses, leaveSee
     .filter((n) => (n.status === "approved" || n.status === "rejected") && leaveSeen[n.id] !== "true");
 }
 
-// ---------- Backend communication ----------
+// ---------- TOD report remarks (principal writes a note on a day's activity entry) ----------
+// Same "no built-in unique ID" situation as leave rows — build a stable one from
+// Timestamp + Name so a remark stays attached to the right row.
+function todCols(rows) {
+  return {
+    tsCol: findColumnKey(rows, /timestamp/i),
+    nameCol: findColumnKey(rows, /name/i),
+  };
+}
+
+function todRowId(row, tsCol, nameCol) {
+  const raw = `${row[tsCol] || ""}_${row[nameCol] || ""}`;
+  return raw.replace(/[^a-zA-Z0-9]+/g, "_").slice(0, 80);
+}
+
+// All principal remarks written against this teacher's TOD reports (newest first).
+function getTeacherTodRemarks(teacher, todResponses, todRemarks) {
+  if (!teacher || !todResponses || todResponses.length === 0) return [];
+  const { tsCol, nameCol } = todCols(todResponses);
+  if (!nameCol) return [];
+  const teacherName = String(teacher.name || "").trim().toLowerCase();
+  return todResponses
+    .filter((row) => String(row[nameCol] || "").trim().toLowerCase() === teacherName)
+    .map((row) => ({ id: todRowId(row, tsCol, nameCol), date: tsCol ? row[tsCol] : "", remark: todRemarks[todRowId(row, tsCol, nameCol)] || "" }))
+    .filter((r) => r.remark)
+    .sort((a, b) => (parseSheetTimestamp(b.date) || 0) - (parseSheetTimestamp(a.date) || 0));
+}
+
+// Remarks the teacher hasn't seen yet — shown once in the login notice popup.
+function getUnseenTodRemarks(teacher, todResponses, todRemarks, todRemarksSeen) {
+  return getTeacherTodRemarks(teacher, todResponses, todRemarks).filter((r) => todRemarksSeen[r.id] !== "true");
+}
+
+
 async function apiGet() {
   const res = await fetch(BACKEND_URL);
   return res.json();
@@ -359,6 +394,8 @@ function backendToState(raw) {
   const overrides = {};
   const leaveStatuses = {};
   const leaveSeen = {};
+  const todRemarks = {};
+  const todRemarksSeen = {};
   Object.keys(settings).forEach((k) => {
     if (k.startsWith("override_") && settings[k]) {
       const rest = k.slice("override_".length);
@@ -370,6 +407,10 @@ function backendToState(raw) {
       leaveStatuses[k.slice("leave_status_".length)] = settings[k];
     } else if (k.startsWith("leave_seen_")) {
       leaveSeen[k.slice("leave_seen_".length)] = settings[k];
+    } else if (k.startsWith("tod_remark_seen_")) {
+      todRemarksSeen[k.slice("tod_remark_seen_".length)] = settings[k];
+    } else if (k.startsWith("tod_remark_")) {
+      todRemarks[k.slice("tod_remark_".length)] = settings[k];
     }
   });
 
@@ -380,6 +421,7 @@ function backendToState(raw) {
     todResponses: raw.todResponses || [],
     leaveResponses: raw.leaveResponses || [],
     leaveStatuses, leaveSeen,
+    todRemarks, todRemarksSeen,
     timetableUrl: settings.timetableUrl || null,
   };
 }
@@ -593,6 +635,29 @@ async function markLeaveSeen(id) {
   if (res && res.success) state.data.leaveSeen[id] = "true";
 }
 
+async function saveTodRemark(id, text) {
+  const key = `tod_remark_${id}`;
+  const res = await apiPost({ action: "setSetting", key, value: text });
+  if (res && res.success) {
+    state.data.todRemarks[id] = text;
+    // A new/edited remark should surface again in the teacher's notice popup.
+    const seenKey = `tod_remark_seen_${id}`;
+    const seenRes = await apiPost({ action: "setSetting", key: seenKey, value: "false" });
+    if (seenRes && seenRes.success) state.data.todRemarksSeen[id] = "false";
+    state.saveError = "";
+  } else {
+    state.saveError = "Could not save remark. Please try again.";
+  }
+  render();
+  showToast(res && res.success ? "Remark saved" : "Failed to save remark");
+}
+
+async function markTodRemarkSeen(id) {
+  const key = `tod_remark_seen_${id}`;
+  const res = await apiPost({ action: "setSetting", key, value: "true" });
+  if (res && res.success) state.data.todRemarksSeen[id] = "true";
+}
+
 async function saveTimetableUrl(url) {
   const res = await apiPost({ action: "setSetting", key: "timetableUrl", value: url });
   if (res && res.success) {
@@ -655,10 +720,11 @@ function handleTeacherLogin(teacherId) {
   const lpStatus = getStatus(state.data, teacherId, "lessonPlan", state.today);
   const feedbackDocs = state.data.documents.filter((d) => d.teacherId === teacherId && d.comment && !d.commentSeen);
   const leaveNotices = getTeacherLeaveNotices(teacher, state.data.leaveResponses, state.data.leaveStatuses, state.data.leaveSeen);
+  const todRemarkNotices = getUnseenTodRemarks(teacher, state.data.todResponses, state.data.todRemarks, state.data.todRemarksSeen);
   openFolder(teacherId);
   const overdueItems = lpStatus.overdue ? [{ cat: "lessonPlan", status: lpStatus }] : [];
-  if (overdueItems.length > 0 || feedbackDocs.length > 0 || leaveNotices.length > 0) {
-    state.modal = { type: "notice", overdueItems, feedbackDocs, leaveNotices };
+  if (overdueItems.length > 0 || feedbackDocs.length > 0 || leaveNotices.length > 0 || todRemarkNotices.length > 0) {
+    state.modal = { type: "notice", overdueItems, feedbackDocs, leaveNotices, todRemarkNotices };
   }
   render();
 }
@@ -1002,6 +1068,75 @@ function renderLeaveTable(rows, leaveStatuses) {
   `;
 }
 
+function renderTodReportsTable(rows, todRemarks) {
+  if (!rows || rows.length === 0) {
+    return `
+      <div class="doc-section" style="margin-top:22px;">
+        <div class="doc-section-head"><span>📝 Day's Activity (TOD Reports)</span></div>
+        <div class="doc-empty">No responses yet. Once the linked Google Form receives submissions, they'll show up here.</div>
+      </div>
+    `;
+  }
+
+  const colSet = [];
+  rows.forEach((r) => Object.keys(r).forEach((k) => { if (!colSet.includes(k)) colSet.push(k); }));
+  const { tsCol, nameCol } = todCols(rows);
+  const cols = tsCol ? [tsCol, ...colSet.filter((c) => c !== tsCol)] : colSet;
+  const compactRegex = /timestamp|\bday\b/i;
+  const nameRegex = /name/i;
+  const sorted = tsCol
+    ? [...rows].sort((a, b) => (parseSheetTimestamp(b[tsCol]) || 0) - (parseSheetTimestamp(a[tsCol]) || 0))
+    : [...rows].reverse();
+  const shown = sorted.slice(0, 100);
+
+  return `
+    <div class="doc-section" style="margin-top:22px;">
+      <div class="doc-section-head">
+        <span>📝 Day's Activity (TOD Reports)</span>
+        <span class="count">(${rows.length}${rows.length > 100 ? " — showing latest 100" : ""})</span>
+      </div>
+      <div class="dash-table-wrap" style="overflow-x:auto;">
+        <table>
+          <thead><tr>
+            ${cols.map((c) => `<th class="${compactRegex.test(c) ? "col-compact" : nameRegex.test(c) ? "col-name" : ""}" title="${esc(c)}">${esc(c)}</th>`).join("")}
+            <th>Principal's Remark</th>
+          </tr></thead>
+          <tbody>
+            ${shown.map((r) => {
+              const id = todRowId(r, tsCol, nameCol);
+              return `
+                <tr>
+                  ${cols.map((c) => `<td class="${compactRegex.test(c) ? "col-compact" : nameRegex.test(c) ? "col-name" : ""}" title="${esc(r[c] ?? "")}">${esc(r[c] ?? "")}</td>`).join("")}
+                  <td style="white-space:normal; min-width:220px;">${todRemarkEditorHtml(id, todRemarks[id] || "")}</td>
+                </tr>
+              `;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function todRemarkEditorHtml(id, currentRemark) {
+  return `
+    <div class="comment-wrap" data-tod="${id}">
+      ${currentRemark ? `<div class="comment-display" style="margin-top:0;">💬 ${esc(currentRemark)}</div>` : ""}
+      <button class="override-btn" data-action="toggle-tod-remark" data-id="${id}">
+        📝 ${currentRemark ? "Edit remark" : "Add remark"}
+      </button>
+      <div class="comment-edit" style="display:none;">
+        <textarea data-role="tod-remark-text" rows="2" placeholder="Write a remark on this day's activity…">${esc(currentRemark || "")}</textarea>
+        <div style="display:flex; gap:6px; margin-top:6px;">
+          <button class="btn btn-dark" data-action="save-tod-remark" data-id="${id}">Save</button>
+          <button class="modal-close" data-action="toggle-tod-remark" data-id="${id}">✕</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+
 function renderDashboard() {
   const data = state.data;
   const attendanceToday = getTodaysAttendance(data.attendanceResponses, state.today);
@@ -1043,7 +1178,7 @@ function renderDashboard() {
 
     ${renderAttendanceSummary(attendanceToday)}
     ${renderResponseTable("Attendance — Today", "📋", attendanceToday.todayRows, "No attendance submitted yet today.")}
-    ${renderResponseTable("TOD Reports", "📝", data.todResponses)}
+    ${renderTodReportsTable(data.todResponses, data.todRemarks)}
     ${renderLeaveTable(data.leaveResponses, data.leaveStatuses)}
   `;
 }
@@ -1143,8 +1278,28 @@ function renderFolder(teacher) {
 
     ${canUpload ? renderUploadBox() : ""}
 
+    ${renderTeacherRemarksSection(teacher)}
+
     ${docSectionHtml("Lesson Plans", lessonPlans, isPrincipal, false)}
     ${docSectionHtml("Other Documents", otherDocs, isPrincipal, true)}
+  `;
+}
+
+function renderTeacherRemarksSection(teacher) {
+  const remarks = getTeacherTodRemarks(teacher, state.data.todResponses, state.data.todRemarks);
+  if (remarks.length === 0) return "";
+  return `
+    <div class="doc-section">
+      <div class="doc-section-head">
+        <span style="font-weight:700; font-size:15px;">📝 Principal's Remarks</span>
+        <span class="count">(${remarks.length})</span>
+      </div>
+      ${remarks.map((r) => `
+        <div class="doc-item">
+          <div class="comment-display" style="margin-top:0;"><strong>${fmtDate(r.date)}</strong> — ${esc(r.remark)}</div>
+        </div>
+      `).join("")}
+    </div>
   `;
 }
 
@@ -1269,7 +1424,7 @@ function renderModal() {
   if (m.type === "teacherLogin") return renderTeacherLoginModal();
   if (m.type === "adminPin") return renderAdminPinModal();
   if (m.type === "changePin") return renderChangePinModal();
-  if (m.type === "notice") return renderNoticeModal(m.overdueItems, m.feedbackDocs, m.leaveNotices);
+  if (m.type === "notice") return renderNoticeModal(m.overdueItems, m.feedbackDocs, m.leaveNotices, m.todRemarkNotices);
   if (m.type === "formEmbed") return renderFormEmbedModal(m.url, m.title);
   return "";
 }
@@ -1389,10 +1544,11 @@ function renderChangePinModal() {
   `;
 }
 
-function renderNoticeModal(overdueItems, feedbackDocs, leaveNotices) {
+function renderNoticeModal(overdueItems, feedbackDocs, leaveNotices, todRemarkNotices) {
   const hasOverdue = overdueItems && overdueItems.length > 0;
   const hasFeedback = feedbackDocs && feedbackDocs.length > 0;
   const hasLeave = leaveNotices && leaveNotices.length > 0;
+  const hasTodRemarks = todRemarkNotices && todRemarkNotices.length > 0;
   return `
     <div class="modal-overlay">
       <div class="modal-box" data-stop-close="1" style="max-width:380px;">
@@ -1418,6 +1574,12 @@ function renderNoticeModal(overdueItems, feedbackDocs, leaveNotices) {
             <div style="background:${n.status === "approved" ? "rgba(223,233,225,0.85)" : "rgba(244,223,225,0.85)"}; border-radius:9px; padding:10px 12px; font-size:13.5px; color:${n.status === "approved" ? "#1e2733" : "#7c1d2e"};">
               <strong>${n.status === "approved" ? "✅ Leave Approved" : "❌ Leave Not Approved"}</strong>
               <div style="margin-top:4px;">${fmtDate(n.start)} &ndash; ${fmtDate(n.end)}</div>
+            </div>
+          `).join("") : ""}
+          ${hasTodRemarks ? todRemarkNotices.map((r) => `
+            <div style="background:rgba(164,131,39,0.14); border-radius:9px; padding:10px 12px; font-size:13.5px; color:#1e2733;">
+              <strong>📝 Principal's remark — ${fmtDate(r.date)}</strong>
+              <div style="margin-top:4px;">${esc(r.remark)}</div>
             </div>
           `).join("") : ""}
         </div>
@@ -1533,10 +1695,12 @@ document.addEventListener("DOMContentLoaded", () => {
     if (action === "close-notice") {
       const feedbackDocs = (state.modal && state.modal.feedbackDocs) || [];
       const leaveNotices = (state.modal && state.modal.leaveNotices) || [];
+      const todRemarkNotices = (state.modal && state.modal.todRemarkNotices) || [];
       state.modal = null;
       render();
       for (const d of feedbackDocs) await markCommentSeen(d.id);
       for (const n of leaveNotices) await markLeaveSeen(n.id);
+      for (const r of todRemarkNotices) await markTodRemarkSeen(r.id);
       return;
     }
 
@@ -1558,6 +1722,18 @@ document.addEventListener("DOMContentLoaded", () => {
       const wrap = el.closest(".comment-wrap");
       const text = wrap.querySelector("[data-role='comment-text']").value.trim();
       await saveComment(el.dataset.doc, text);
+      return;
+    }
+    if (action === "toggle-tod-remark") {
+      const wrap = el.closest(".comment-wrap");
+      const editRow = wrap.querySelector(".comment-edit");
+      editRow.style.display = editRow.style.display === "none" ? "block" : "none";
+      return;
+    }
+    if (action === "save-tod-remark") {
+      const wrap = el.closest(".comment-wrap");
+      const text = wrap.querySelector("[data-role='tod-remark-text']").value.trim();
+      await saveTodRemark(el.dataset.id, text);
       return;
     }
     if (action === "save-override") {
