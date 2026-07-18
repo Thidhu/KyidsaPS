@@ -265,6 +265,23 @@ main { max-width: 980px; margin: 0 auto; padding: 24px 20px 60px; animation: vie
 }
 @keyframes twinkle { 0%, 100% { opacity: 0.15; } 50% { opacity: 1; } }
 
+#boot-loader {
+  position: fixed; inset: 0; z-index: 9999;
+  background: linear-gradient(135deg, #1c2d52 0%, #14213d 100%);
+  display: flex; align-items: center; justify-content: center; flex-direction: column;
+  transition: opacity 0.3s ease;
+}
+#boot-loader.boot-loader-hide { opacity: 0; pointer-events: none; }
+.boot-logo {
+  width: 120px; height: 120px; border-radius: 50%; object-fit: cover;
+  background: #0a1530; border: 3px solid rgba(255,255,255,0.85);
+  box-shadow: 0 10px 28px rgba(10,21,48,0.5);
+  margin-bottom: 18px;
+}
+.boot-percent { font-family: 'Fraunces', serif; font-size: 32px; font-weight: 700; color: #f2e9d8; margin-bottom: 16px; }
+.boot-bar { width: 180px; height: 6px; border-radius: 3px; background: rgba(255,255,255,0.15); overflow: hidden; }
+.boot-bar-fill { height: 100%; width: 0%; background: #e0932c; border-radius: 3px; }
+
 .out-of-station-banner {
   margin-top: 18px; padding: 14px 18px; border-radius: 14px;
   background: rgba(124,29,46,0.12); border: 1px solid rgba(124,29,46,0.28);
