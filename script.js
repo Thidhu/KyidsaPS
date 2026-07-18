@@ -1303,14 +1303,13 @@ function renderFolder(teacher) {
 
 function renderTeacherRemarksSection(teacher) {
   const remarks = getTeacherTodRemarks(teacher, state.data.todResponses, state.data.todRemarks);
-  if (remarks.length === 0) return "";
   return `
     <div class="doc-section">
       <div class="doc-section-head">
         <span style="font-weight:700; font-size:15px;">📝 Principal's Remarks</span>
         <span class="count">(${remarks.length})</span>
       </div>
-      ${remarks.map((r) => `
+      ${remarks.length === 0 ? `<div class="doc-empty">No remarks yet.</div>` : remarks.map((r) => `
         <div class="doc-item">
           <div class="comment-display" style="margin-top:0;"><strong>${fmtDate(r.date)}</strong> — ${esc(r.remark)}</div>
         </div>
@@ -1321,14 +1320,13 @@ function renderTeacherRemarksSection(teacher) {
 
 function renderTeacherLeaveSection(teacher) {
   const requests = getTeacherLeaveRequests(teacher, state.data.leaveResponses, state.data.leaveStatuses);
-  if (requests.length === 0) return "";
   return `
     <div class="doc-section">
       <div class="doc-section-head">
         <span style="font-weight:700; font-size:15px;">🧳 My Leave Requests</span>
         <span class="count">(${requests.length})</span>
       </div>
-      ${requests.map((r) => `
+      ${requests.length === 0 ? `<div class="doc-empty">No leave requests found for you yet. Make sure the Name you type on the Leave form exactly matches your name in the Teacher Directory (currently: "${esc(teacher.name)}").</div>` : requests.map((r) => `
         <div class="doc-item">
           <div class="doc-row" style="gap:10px; flex-wrap:wrap;">
             <span style="flex:1; font-weight:600;">${r.start && r.end ? `${fmtDate(r.start)} &ndash; ${fmtDate(r.end)}` : "—"}</span>
