@@ -27,7 +27,12 @@ const PORTFOLIO_LINKS = [
 // share that sheet only with the principal to keep it principal-only viewing.
 const ATTENDANCE_FORM_URL = "https://forms.gle/zdDsEDyXt71dFQGf8";
 const TOD_FORM_URL = "https://forms.gle/9cC3tdPFxaXDSkJi8";
-const LEAVE_FORM_URL = "https://forms.gle/Jd2uMd6SsejbuMue8";
+const LEAVE_FORM_URL = "PASTE_YOUR_LEAVE_FORM_LINK_HERE";
+
+// External tools (not Google Forms) — opened in a new tab rather than embedded,
+// since most external sites block being shown in an iframe.
+const TIMETABLE_GENERATOR_URL = "https://thinleywangchuk478.github.io/TIME-TABLE-GENERATOR/";
+const EMIS_URL = "PASTE_YOUR_EMIS_LINK_HERE";
 
 function emptyData() {
   return {
@@ -42,6 +47,7 @@ function emptyData() {
     attendanceResponses: [],
     todResponses: [],
     leaveResponses: [],
+    timetableUrl: null,
   };
 }
 
@@ -374,6 +380,7 @@ function backendToState(raw) {
     todResponses: raw.todResponses || [],
     leaveResponses: raw.leaveResponses || [],
     leaveStatuses, leaveSeen,
+    timetableUrl: settings.timetableUrl || null,
   };
 }
 
@@ -586,6 +593,18 @@ async function markLeaveSeen(id) {
   if (res && res.success) state.data.leaveSeen[id] = "true";
 }
 
+async function saveTimetableUrl(url) {
+  const res = await apiPost({ action: "setSetting", key: "timetableUrl", value: url });
+  if (res && res.success) {
+    state.data.timetableUrl = url || null;
+    state.saveError = "";
+  } else {
+    state.saveError = "Could not save timetable link. Please try again.";
+  }
+  render();
+  showToast(res && res.success ? "Timetable link updated" : "Failed to save");
+}
+
 async function setAdminPin(pin) {
   const res = await apiPost({ action: "setSetting", key: "adminPin", value: pin });
   if (res && res.success) {
@@ -753,9 +772,33 @@ function renderOutOfStationBanner() {
   `;
 }
 
+function renderTimetableSection() {
+  const url = state.data.timetableUrl;
+  const isPrincipal = state.adminMode && !state.session;
+  return `
+    <div class="doc-section timetable-section" style="margin-top:22px;">
+      <div class="doc-section-head"><span>📅 Current Timetable</span></div>
+      ${url
+        ? `<a class="doc-row link-row" href="${esc(url)}" target="_blank" rel="noopener">
+             <span style="font-size:16px;">📅</span>
+             <span style="flex:1;">View the latest published timetable</span>
+             <span style="color:#9aa2b1;">↗</span>
+           </a>`
+        : `<div class="doc-empty">${isPrincipal ? "No timetable published yet — paste a link below once one's generated." : "No timetable has been published yet."}</div>`}
+      ${isPrincipal ? `
+        <div class="timetable-editor">
+          <input type="text" id="timetable-url-input" placeholder="Paste the generated timetable link (Drive/image/PDF URL)" value="${esc(url || "")}" />
+          <button class="btn btn-dark" data-action="save-timetable-url">Save</button>
+        </div>
+      ` : ""}
+    </div>
+  `;
+}
+
 function renderHome() {
   return `
     <div class="hero-panel">
+      <img class="hero-logo" src="${esc(LOGO_URL)}" alt="Kyidsa Primary School logo" onerror="this.style.display='none'" />
       <h2 class="serif" style="font-size:24px; margin:0 0 6px;">Kyidsa Primary School Portal</h2>
       <div style="font-size:13.5px; color:#dfe4f0; margin-bottom:20px;">Everything the school needs, in one place.</div>
       <button class="btn btn-ghost" data-action="set-view" data-view="directory">👩‍🏫 Go to Teacher Directory</button>
@@ -779,7 +822,19 @@ function renderHome() {
         <span class="action-label">Apply for Leave</span>
         <span class="action-sub">Pending admin approval</span>
       </button>
+      <button class="action-card" data-action="open-external" data-url="${esc(TIMETABLE_GENERATOR_URL)}">
+        <span class="action-icon">🗓️</span>
+        <span class="action-label">Timetable Generator</span>
+        <span class="action-sub">Opens in a new tab</span>
+      </button>
+      <button class="action-card" data-action="open-external" data-url="${esc(EMIS_URL)}">
+        <span class="action-icon">🏫</span>
+        <span class="action-label">EMIS</span>
+        <span class="action-sub">Education Management Info System</span>
+      </button>
     </div>
+
+    ${renderTimetableSection()}
 
     <div class="doc-section" style="margin-top:22px;">
       <div class="doc-section-head"><span>Important Links</span></div>
@@ -1418,6 +1473,22 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       state.modal = { type: "formEmbed", url, title: el.dataset.title || "Form" };
       return render();
+    }
+
+    if (action === "open-external") {
+      const url = el.dataset.url;
+      if (!url || url.startsWith("PASTE_")) {
+        alert("This link hasn't been set up yet. Paste it into TIMETABLE_GENERATOR_URL / EMIS_URL near the top of script.js.");
+        return;
+      }
+      window.open(url, "_blank", "noopener");
+      return;
+    }
+
+    if (action === "save-timetable-url") {
+      const val = document.getElementById("timetable-url-input").value.trim();
+      await saveTimetableUrl(val);
+      return;
     }
 
     if (action === "cancel-staged-upload") {
