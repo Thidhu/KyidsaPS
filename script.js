@@ -16,9 +16,9 @@ const CATEGORY_LABEL = { lessonPlan: "Lesson Plan", otherDocuments: "Other Docum
 
 // Edit these to point at your actual links — shown on the Home page
 const PORTFOLIO_LINKS = [
-  { label: "School Records (Google Drive)", url: "PASTE_DRIVE_FOLDER_LINK_HERE", icon: "📁" },
-  { label: "Master Data Sheet", url: "PASTE_GOOGLE_SHEET_LINK_HERE", icon: "📊" },
-  { label: "School Vision & Mission", url: "PASTE_LINK_HERE", icon: "🏫" },
+  { label: "School Records (Google Drive)", url: "Coming Soon!!!", icon: "📁" },
+  { label: "Master Data Sheet", url: "Coming Soon!!!", icon: "📊" },
+  { label: "School Vision & Mission", url: "Coming Soon!!!", icon: "🏫" },
 ];
 
 // Paste your published Google Form links here.
@@ -27,12 +27,12 @@ const PORTFOLIO_LINKS = [
 // share that sheet only with the principal to keep it principal-only viewing.
 const ATTENDANCE_FORM_URL = "https://forms.gle/zdDsEDyXt71dFQGf8";
 const TOD_FORM_URL = "https://forms.gle/9cC3tdPFxaXDSkJi8";
-const LEAVE_FORM_URL = "PASTE_YOUR_LEAVE_FORM_LINK_HERE";
+const LEAVE_FORM_URL = "https://forms.gle/4PyP1VapqVohfvvG8";
 
 // External tools (not Google Forms) — opened in a new tab rather than embedded,
 // since most external sites block being shown in an iframe.
 const TIMETABLE_GENERATOR_URL = "https://thinleywangchuk478.github.io/TIME-TABLE-GENERATOR/";
-const EMIS_URL = "PASTE_YOUR_EMIS_LINK_HERE";
+const EMIS_URL = "https://portal.education.gov.bt/";
 
 function emptyData() {
   return {
