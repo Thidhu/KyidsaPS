@@ -50,6 +50,8 @@ function emptyData() {
     todRemarks: {},
     todRemarksSeen: {},
     timetableUrl: null,
+    customFolders: [],
+    links: [],
   };
 }
 
@@ -412,8 +414,18 @@ async function apiPost(payload) {
 }
 
 function backendToState(raw) {
+  const teacherFolderUrls = raw.teacherFolderUrls || {};
   const teachers = (raw.teachers || []).map((t) => ({
     id: t.ID, name: t.Name, subject: t.Subject, phone: t.Phone, photo: t.PhotoURL || null,
+    folderUrl: teacherFolderUrls[t.ID] || null,
+  }));
+
+  const customFolders = (raw.customFolders || []).map((f) => ({
+    id: f.ID, teacherId: f.TeacherID, folderName: f.FolderName, folderUrl: f.DriveFolderURL, createdAt: f.CreatedAt,
+  }));
+
+  const links = (raw.links || []).map((l) => ({
+    id: l.ID, teacherId: l.TeacherID, title: l.Title, url: l.URL, addedBy: l.AddedBy, createdAt: l.CreatedAt,
   }));
 
   const documents = (raw.uploads || []).map((u) => ({
@@ -461,6 +473,7 @@ function backendToState(raw) {
     leaveStatuses, leaveSeen,
     todRemarks, todRemarksSeen,
     timetableUrl: settings.timetableUrl || null,
+    customFolders, links,
   };
 }
 
@@ -638,14 +651,16 @@ async function removeDocument(id) {
 
 async function updateSchedule(category, schedule) {
   const key = category === "lessonPlan" ? "schedule_lessonPlan" : "schedule_otherDocuments";
-  const res = await apiPost({ action: "setSetting", key, value: JSON.stringify(schedule) });
-  if (res && res.success) {
-    state.data.schedules[category] = schedule;
-    state.saveError = "";
-  } else {
-    state.saveError = "Could not update schedule. Please try again.";
-  }
+  const prev = state.data.schedules[category];
+  state.data.schedules[category] = schedule;
+  state.saveError = "";
   render();
+  const res = await apiPost({ action: "setSetting", key, value: JSON.stringify(schedule) });
+  if (!(res && res.success)) {
+    state.data.schedules[category] = prev;
+    state.saveError = "Could not update schedule. Please try again.";
+    render();
+  }
   showToast(res && res.success ? "Schedule updated" : "Failed to update");
 }
 
@@ -670,29 +685,32 @@ async function removeCalendarDueDate(dateStr) {
 
 async function setOverride(teacherId, category, dateStr) {
   const key = `override_${teacherId}_${category}`;
-  const res = await apiPost({ action: "setSetting", key, value: dateStr || "" });
-  if (res && res.success) {
-    const overrideKey = `${teacherId}:${category}`;
-    if (dateStr) state.data.overrides[overrideKey] = dateStr;
-    else delete state.data.overrides[overrideKey];
-    state.saveError = "";
-  } else {
-    state.saveError = "Could not save due date. Please try again.";
-  }
+  const overrideKey = `${teacherId}:${category}`;
+  const prev = state.data.overrides[overrideKey];
+  if (dateStr) state.data.overrides[overrideKey] = dateStr; else delete state.data.overrides[overrideKey];
+  state.saveError = "";
   render();
+  const res = await apiPost({ action: "setSetting", key, value: dateStr || "" });
+  if (!(res && res.success)) {
+    if (prev !== undefined) state.data.overrides[overrideKey] = prev; else delete state.data.overrides[overrideKey];
+    state.saveError = "Could not save due date. Please try again.";
+    render();
+  }
   showToast(res && res.success ? (dateStr ? "Custom due date set" : "Custom due date cleared") : "Failed to save");
 }
 
 async function setLeaveStatus(id, status) {
   const key = `leave_status_${id}`;
-  const res = await apiPost({ action: "setSetting", key, value: status });
-  if (res && res.success) {
-    state.data.leaveStatuses[id] = status;
-    state.saveError = "";
-  } else {
-    state.saveError = "Could not update leave status. Please try again.";
-  }
+  const prev = state.data.leaveStatuses[id];
+  state.data.leaveStatuses[id] = status;
+  state.saveError = "";
   render();
+  const res = await apiPost({ action: "setSetting", key, value: status });
+  if (!(res && res.success)) {
+    if (prev === undefined) delete state.data.leaveStatuses[id]; else state.data.leaveStatuses[id] = prev;
+    state.saveError = "Could not update leave status. Please try again.";
+    render();
+  }
   showToast(res && res.success ? `Leave ${status}` : "Failed to update leave status");
 }
 
@@ -704,18 +722,25 @@ async function markLeaveSeen(id) {
 
 async function saveTodRemark(id, text) {
   const key = `tod_remark_${id}`;
-  const res = await apiPost({ action: "setSetting", key, value: text });
-  if (res && res.success) {
-    state.data.todRemarks[id] = text;
-    // A new/edited remark should surface again in the teacher's notice popup.
-    const seenKey = `tod_remark_seen_${id}`;
-    const seenRes = await apiPost({ action: "setSetting", key: seenKey, value: "false" });
-    if (seenRes && seenRes.success) state.data.todRemarksSeen[id] = "false";
-    state.saveError = "";
-  } else {
-    state.saveError = "Could not save remark. Please try again.";
-  }
+  const seenKey = `tod_remark_seen_${id}`;
+  const prevRemark = state.data.todRemarks[id];
+  const prevSeen = state.data.todRemarksSeen[id];
+  state.data.todRemarks[id] = text;
+  state.data.todRemarksSeen[id] = "false"; // a new/edited remark should surface again in the teacher's notice popup
+  state.saveError = "";
   render();
+  const [res, seenRes] = await Promise.all([
+    apiPost({ action: "setSetting", key, value: text }),
+    apiPost({ action: "setSetting", key: seenKey, value: "false" }),
+  ]);
+  if (!(res && res.success)) {
+    state.data.todRemarks[id] = prevRemark || "";
+    state.saveError = "Could not save remark. Please try again.";
+    render();
+  }
+  if (!(seenRes && seenRes.success)) {
+    state.data.todRemarksSeen[id] = prevSeen;
+  }
   showToast(res && res.success ? "Remark saved" : "Failed to save remark");
 }
 
@@ -726,15 +751,76 @@ async function markTodRemarkSeen(id) {
 }
 
 async function saveTimetableUrl(url) {
+  const prev = state.data.timetableUrl;
+  state.data.timetableUrl = url || null;
+  state.saveError = "";
+  render();
   const res = await apiPost({ action: "setSetting", key: "timetableUrl", value: url });
+  if (!(res && res.success)) {
+    state.data.timetableUrl = prev;
+    state.saveError = "Could not save timetable link. Please try again.";
+    render();
+  }
+  showToast(res && res.success ? "Timetable link updated" : "Failed to save");
+}
+
+// These two genuinely need the server round-trip (a real Drive folder has to be
+// created), so they're not optimistic — but the button shows "Creating…" the
+// instant it's clicked via state.busyFolder, so it never feels frozen.
+async function createCustomFolder(teacherId, teacherName, folderName) {
+  state.busyFolder = true;
+  render();
+  const res = await apiPost({ action: "createFolder", teacherId, teacherName, folderName });
   if (res && res.success) {
-    state.data.timetableUrl = url || null;
+    state.data.customFolders.push({ id: res.id, teacherId, folderName, folderUrl: res.folderUrl, createdAt: new Date().toISOString() });
     state.saveError = "";
   } else {
-    state.saveError = "Could not save timetable link. Please try again.";
+    state.saveError = "Could not create folder: " + (res && res.error ? res.error : "please try again.");
   }
+  state.busyFolder = false;
   render();
-  showToast(res && res.success ? "Timetable link updated" : "Failed to save");
+  showToast(res && res.success ? "Folder created" : "Failed to create folder");
+}
+
+async function removeCustomFolder(folderId) {
+  const prev = state.data.customFolders;
+  state.data.customFolders = state.data.customFolders.filter((f) => f.id !== folderId);
+  render();
+  const res = await apiPost({ action: "removeFolderRecord", folderId });
+  if (!(res && res.success)) {
+    state.data.customFolders = prev;
+    state.saveError = "Could not remove folder from the list. Please try again.";
+    render();
+  }
+  showToast(res && res.success ? "Removed from list" : "Failed to remove");
+}
+
+async function addResourceLink(teacherId, title, url, addedBy) {
+  state.busyLink = true;
+  render();
+  const res = await apiPost({ action: "addLink", teacherId, title, url, addedBy });
+  if (res && res.success) {
+    state.data.links.push({ id: res.id, teacherId, title: title || url, url, addedBy, createdAt: new Date().toISOString() });
+    state.saveError = "";
+  } else {
+    state.saveError = "Could not save link: " + (res && res.error ? res.error : "please try again.");
+  }
+  state.busyLink = false;
+  render();
+  showToast(res && res.success ? "Link added" : "Failed to add link");
+}
+
+async function removeResourceLink(linkId) {
+  const prev = state.data.links;
+  state.data.links = state.data.links.filter((l) => l.id !== linkId);
+  render();
+  const res = await apiPost({ action: "removeLink", linkId });
+  if (!(res && res.success)) {
+    state.data.links = prev;
+    state.saveError = "Could not remove link. Please try again.";
+    render();
+  }
+  showToast(res && res.success ? "Link removed" : "Failed to remove");
 }
 
 async function setAdminPin(pin) {
@@ -750,18 +836,18 @@ async function setAdminPin(pin) {
 }
 
 async function saveComment(docId, commentText) {
+  const doc = state.data.documents.find((d) => d.id === docId);
+  const prevComment = doc ? doc.comment : undefined;
+  const prevSeen = doc ? doc.commentSeen : undefined;
+  if (doc) { doc.comment = commentText; doc.commentSeen = false; }
+  state.saveError = "";
+  render(); // show it immediately — don't wait on the network round-trip
   const res = await apiPost({ action: "setComment", docId, comment: commentText });
-  if (res && res.success) {
-    const doc = state.data.documents.find((d) => d.id === docId);
-    if (doc) {
-      doc.comment = commentText;
-      doc.commentSeen = false;
-    }
-    state.saveError = "";
-  } else {
+  if (!(res && res.success)) {
+    if (doc) { doc.comment = prevComment; doc.commentSeen = prevSeen; }
     state.saveError = "Could not save feedback: " + (res && res.error ? res.error : "unknown error, please try again.");
+    render();
   }
-  render();
   showToast(res && res.success ? "Feedback saved" : "Failed to save feedback");
 }
 
@@ -953,15 +1039,15 @@ function renderHome() {
         <span class="action-label">I'm a Teacher</span>
         <span class="action-sub">Log in for Attendance, TOD Report &amp; Leave</span>
       </button>
-      <button class="action-card" data-action="open-external" data-url="${esc(TIMETABLE_GENERATOR_URL)}">
+      <button class="action-card" data-action="open-external" data-url="${esc(TIMETABLE_GENERATOR_URL)}" data-title="Timetable Generator">
         <span class="action-icon">🗓️</span>
         <span class="action-label">Timetable Generator</span>
-        <span class="action-sub">Opens in a new tab</span>
+        <span class="action-sub">Opens here in the app</span>
       </button>
-      <button class="action-card" data-action="open-external" data-url="${esc(EMIS_URL)}">
+      <button class="action-card" data-action="open-external" data-url="${esc(EMIS_URL)}" data-title="EMIS">
         <span class="action-icon">🏫</span>
         <span class="action-label">EMIS</span>
-        <span class="action-sub">Education Management Info System</span>
+        <span class="action-sub">Opens here in the app</span>
       </button>
     </div>
 
@@ -1358,6 +1444,8 @@ function renderFolder(teacher) {
 
     ${renderTeacherRemarksSection(teacher)}
     ${renderTeacherLeaveSection(teacher)}
+    ${renderTeacherDriveSection(teacher, isPrincipal, canUpload)}
+    ${renderTeacherLinksSection(teacher, isPrincipal, canUpload)}
 
     ${docSectionHtml("Lesson Plans", lessonPlans, isPrincipal, false)}
     ${docSectionHtml("Other Documents", otherDocs, isPrincipal, true)}
@@ -1398,6 +1486,64 @@ function renderTeacherLeaveSection(teacher) {
           ${r.reason ? `<div class="doc-meta">${esc(r.reason)}</div>` : ""}
         </div>
       `).join("")}
+    </div>
+  `;
+}
+
+function renderTeacherDriveSection(teacher, isPrincipal, canUpload) {
+  const folders = state.data.customFolders.filter((f) => f.teacherId === teacher.id);
+  return `
+    <div class="doc-section">
+      <div class="doc-section-head">
+        <span style="font-weight:700; font-size:15px;">📂 Google Drive</span>
+      </div>
+      ${teacher.folderUrl ? `
+        <a href="${esc(teacher.folderUrl)}" target="_blank" rel="noopener" class="doc-row link-row" style="margin-bottom:12px;">
+          <span>📁 Open ${esc(teacher.name)}'s Drive Folder — work directly in Docs &amp; Sheets</span>
+        </a>
+      ` : `<div class="doc-empty">Drive folder link isn't available yet — it's created the first time a document is uploaded.</div>`}
+
+      ${folders.length > 0 ? folders.map((f) => `
+        <div class="doc-row">
+          <a href="${esc(f.folderUrl)}" target="_blank" rel="noopener">📁 ${esc(f.folderName)}</a>
+          ${(canUpload || isPrincipal) ? `<button class="del" data-action="remove-custom-folder" data-id="${f.id}" title="Remove from this list">✕</button>` : ""}
+        </div>
+      `).join("") : ""}
+
+      ${canUpload ? `
+        <div class="upload-row" style="margin-top:10px;">
+          <input type="text" id="new-folder-name" placeholder="New folder name (e.g. Class 5 Worksheets)" style="flex:1; min-width:160px;" />
+          <button class="btn btn-dark" data-action="create-folder" ${state.busyFolder ? "disabled" : ""}>${state.busyFolder ? "Creating…" : "+ New Folder"}</button>
+        </div>
+      ` : ""}
+    </div>
+  `;
+}
+
+function renderTeacherLinksSection(teacher, isPrincipal, canUpload) {
+  const links = state.data.links.filter((l) => l.teacherId === teacher.id);
+  const canManage = canUpload || isPrincipal;
+  return `
+    <div class="doc-section">
+      <div class="doc-section-head">
+        <span style="font-weight:700; font-size:15px;">🔗 Links</span>
+        <span class="count">(${links.length})</span>
+      </div>
+      ${links.length === 0 ? `<div class="doc-empty">No links yet. Paste a Google Doc, Sheet, or any other link below.</div>` : links.map((l) => `
+        <div class="doc-row">
+          <a href="${esc(l.url)}" target="_blank" rel="noopener" title="${esc(l.url)}">🔗 ${esc(l.title || l.url)}</a>
+          ${l.addedBy ? `<span class="date">${esc(l.addedBy)}</span>` : ""}
+          ${canManage ? `<button class="del" data-action="remove-link" data-id="${l.id}" title="Remove link">✕</button>` : ""}
+        </div>
+      `).join("")}
+
+      ${canManage ? `
+        <div class="upload-row" style="margin-top:10px;">
+          <input type="text" id="new-link-title" placeholder="Title (e.g. Term 2 Marks Sheet)" style="flex:1; min-width:140px;" />
+          <input type="url" id="new-link-url" placeholder="Paste link here" style="flex:1; min-width:160px;" />
+          <button class="btn btn-dark" data-action="add-link" data-teacher="${teacher.id}" ${state.busyLink ? "disabled" : ""}>${state.busyLink ? "Adding…" : "+ Add Link"}</button>
+        </div>
+      ` : ""}
     </div>
   `;
 }
@@ -1547,6 +1693,7 @@ function renderModal() {
   if (m.type === "changePin") return renderChangePinModal();
   if (m.type === "notice") return renderNoticeModal(m.overdueItems, m.feedbackDocs, m.leaveNotices, m.todRemarkNotices);
   if (m.type === "formEmbed") return renderFormEmbedModal(m.url, m.title);
+  if (m.type === "externalEmbed") return renderExternalEmbedModal(m.url, m.title);
   return "";
 }
 
@@ -1566,6 +1713,25 @@ function renderFormEmbedModal(url, title) {
         </div>
         <div style="text-align:center; margin-top:10px;">
           <a href="${esc(url)}" target="_blank" rel="noopener" style="font-size:12.5px; color:#45526b;">Trouble viewing the form? Open it in a new tab ↗</a>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderExternalEmbedModal(url, title) {
+  return `
+    <div class="modal-overlay" data-action="modal-overlay-close">
+      <div class="modal-box form-modal-box" data-stop-close="1">
+        <div class="modal-head">
+          <div class="modal-title">${esc(title)}</div>
+          <button class="modal-close" data-action="close-modal">✕</button>
+        </div>
+        <div class="form-embed-wrap">
+          <iframe src="${esc(url)}" width="100%" height="640" frameborder="0" marginheight="0" marginwidth="0">Loading…</iframe>
+        </div>
+        <div style="text-align:center; margin-top:10px;">
+          <a href="${esc(url)}" target="_blank" rel="noopener" style="font-size:12.5px; color:#45526b;">Blank or not loading? Some sites don't allow this — open it in a new tab instead ↗</a>
         </div>
       </div>
     </div>
@@ -1789,8 +1955,8 @@ document.addEventListener("DOMContentLoaded", () => {
         alert("This link hasn't been set up yet. Paste it into TIMETABLE_GENERATOR_URL / EMIS_URL near the top of script.js.");
         return;
       }
-      window.open(url, "_blank", "noopener");
-      return;
+      state.modal = { type: "externalEmbed", url, title: el.dataset.title || "" };
+      return render();
     }
 
     if (action === "save-timetable-url") {
@@ -1882,6 +2048,29 @@ document.addEventListener("DOMContentLoaded", () => {
       await saveTodRemark(el.dataset.id, text);
       return;
     }
+    if (action === "create-folder") {
+      const input = document.getElementById("new-folder-name");
+      const name = input ? input.value.trim() : "";
+      if (!name) { alert("Please enter a folder name."); return; }
+      const teacher = state.data.teachers.find((t) => t.id === state.activeTeacherId);
+      if (!teacher) return;
+      await createCustomFolder(teacher.id, teacher.name, name);
+      return;
+    }
+    if (action === "remove-custom-folder") { await removeCustomFolder(el.dataset.id); return; }
+    if (action === "add-link") {
+      const titleInput = document.getElementById("new-link-title");
+      const urlInput = document.getElementById("new-link-url");
+      const title = titleInput ? titleInput.value.trim() : "";
+      const url = urlInput ? urlInput.value.trim() : "";
+      if (!url) { alert("Please paste a link first."); return; }
+      const isPrincipalNow = state.adminMode && !state.session;
+      const teacher = state.data.teachers.find((t) => t.id === el.dataset.teacher);
+      const addedBy = isPrincipalNow ? "Principal" : (teacher ? teacher.name : "");
+      await addResourceLink(el.dataset.teacher, title, url, addedBy);
+      return;
+    }
+    if (action === "remove-link") { await removeResourceLink(el.dataset.id); return; }
     if (action === "save-override") {
       const wrap = el.closest(".override-wrap");
       const dateVal = wrap.querySelector("[data-role='override-date']").value;
