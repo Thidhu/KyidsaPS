@@ -1,6 +1,6 @@
 // ---------- Constants ----------
 // PASTE YOUR APPS SCRIPT WEB APP URL HERE (from Deploy > New deployment)
-const BACKEND_URL = "https://script.google.com/macros/s/AKfycbwJ59_6omulKKu07hMKSnc7au9kIgoUzop8PvRWxc3P4Eyqyw7x4Qqg20cwyEIK3VVe4Q/exec";
+const BACKEND_URL = "https://script.google.com/macros/s/AKfycbwg8Ewe8O2fyb_HN87zvKafdLiPRdMNCrwd2b6-2Q_3rQ1xYRKZCA4qWUDkHZIO4zlcTw/exec";
 
 // Put your welcome sound file (e.g. "audio/welcome.mp3") in your project folder,
 // then update this path if needed. If the file is missing, playback just silently
@@ -422,6 +422,7 @@ function backendToState(raw) {
 
   const customFolders = (raw.customFolders || []).map((f) => ({
     id: f.ID, teacherId: f.TeacherID, folderName: f.FolderName, folderUrl: f.DriveFolderURL, createdAt: f.CreatedAt,
+    parentFolderId: f.ParentFolderId || "", driveFolderId: f.DriveFolderId || "",
   }));
 
   const links = (raw.links || []).map((l) => ({
@@ -767,12 +768,16 @@ async function saveTimetableUrl(url) {
 // These two genuinely need the server round-trip (a real Drive folder has to be
 // created), so they're not optimistic — but the button shows "Creating…" the
 // instant it's clicked via state.busyFolder, so it never feels frozen.
-async function createCustomFolder(teacherId, teacherName, folderName) {
+async function createCustomFolder(teacherId, teacherName, folderName, parentFolderId) {
   state.busyFolder = true;
   render();
-  const res = await apiPost({ action: "createFolder", teacherId, teacherName, folderName });
+  const res = await apiPost({ action: "createFolder", teacherId, teacherName, folderName, parentFolderId: parentFolderId || "" });
   if (res && res.success) {
-    state.data.customFolders.push({ id: res.id, teacherId, folderName, folderUrl: res.folderUrl, createdAt: new Date().toISOString() });
+    state.data.customFolders.push({
+      id: res.id, teacherId, folderName, folderUrl: res.folderUrl,
+      driveFolderId: res.folderId || "", parentFolderId: parentFolderId || "",
+      createdAt: new Date().toISOString(),
+    });
     state.saveError = "";
   } else {
     state.saveError = "Could not create folder: " + (res && res.error ? res.error : "please try again.");
@@ -1491,29 +1496,53 @@ function renderTeacherLeaveSection(teacher) {
 }
 
 function renderTeacherDriveSection(teacher, isPrincipal, canUpload) {
-  const folders = state.data.customFolders.filter((f) => f.teacherId === teacher.id);
+  // Track where we're currently browsing per-teacher (resets when you switch teachers)
+  if (!state.driveNav || state.driveNav.teacherId !== teacher.id) {
+    state.driveNav = { teacherId: teacher.id, path: [] };
+  }
+  const path = state.driveNav.path; // array of { driveFolderId, name, url }
+  const currentParentId = path.length > 0 ? path[path.length - 1].driveFolderId : "";
+  const currentUrl = path.length > 0 ? path[path.length - 1].url : teacher.folderUrl;
+  const currentLabel = path.length > 0 ? path[path.length - 1].name : `${teacher.name}'s Drive Folder`;
+
+  const childFolders = state.data.customFolders.filter(
+    (f) => f.teacherId === teacher.id && (f.parentFolderId || "") === currentParentId
+  );
+
+  const breadcrumbHtml = `
+    <div class="drive-breadcrumbs">
+      <button class="crumb ${path.length === 0 ? "active" : ""}" data-action="drive-nav-root">🏠 ${esc(teacher.name)}'s Folder</button>
+      ${path.map((p, i) => `
+        <span class="crumb-sep">›</span>
+        <button class="crumb ${i === path.length - 1 ? "active" : ""}" data-action="drive-nav-crumb" data-index="${i}">${esc(p.name)}</button>
+      `).join("")}
+    </div>
+  `;
+
   return `
     <div class="doc-section">
       <div class="doc-section-head">
         <span style="font-weight:700; font-size:15px;">📂 Google Drive</span>
       </div>
-      ${teacher.folderUrl ? `
-        <a href="${esc(teacher.folderUrl)}" target="_blank" rel="noopener" class="doc-row link-row" style="margin-bottom:12px;">
-          <span>📁 Open ${esc(teacher.name)}'s Drive Folder — work directly in Docs &amp; Sheets</span>
+      ${breadcrumbHtml}
+      ${currentUrl ? `
+        <a href="${esc(currentUrl)}" target="_blank" rel="noopener" class="doc-row link-row" style="margin-bottom:12px;">
+          <span>📁 Open "${esc(currentLabel)}" in Drive — work directly in Docs &amp; Sheets</span>
         </a>
       ` : `<div class="doc-empty">Drive folder link isn't available yet — it's created the first time a document is uploaded.</div>`}
 
-      ${folders.length > 0 ? folders.map((f) => `
+      ${childFolders.length > 0 ? childFolders.map((f) => `
         <div class="doc-row">
-          <a href="${esc(f.folderUrl)}" target="_blank" rel="noopener">📁 ${esc(f.folderName)}</a>
+          <button class="folder-nav-btn" data-action="drive-nav-into" data-id="${f.id}">📁 ${esc(f.folderName)}</button>
+          <a href="${esc(f.folderUrl)}" target="_blank" rel="noopener" class="open-link" title="Open in Drive">↗</a>
           ${(canUpload || isPrincipal) ? `<button class="del" data-action="remove-custom-folder" data-id="${f.id}" title="Remove from this list">✕</button>` : ""}
         </div>
-      `).join("") : ""}
+      `).join("") : `<div class="doc-empty">No subfolders here yet.</div>`}
 
       ${canUpload ? `
         <div class="upload-row" style="margin-top:10px;">
           <input type="text" id="new-folder-name" placeholder="New folder name (e.g. Class 5 Worksheets)" style="flex:1; min-width:160px;" />
-          <button class="btn btn-dark" data-action="create-folder" ${state.busyFolder ? "disabled" : ""}>${state.busyFolder ? "Creating…" : "+ New Folder"}</button>
+          <button class="btn btn-dark" data-action="create-folder" data-parent="${esc(currentParentId)}" ${state.busyFolder ? "disabled" : ""}>${state.busyFolder ? "Creating…" : `+ New Folder ${path.length > 0 ? "here" : ""}`}</button>
         </div>
       ` : ""}
     </div>
@@ -1722,15 +1751,15 @@ function renderFormEmbedModal(url, title) {
 function renderExternalEmbedModal(url, title) {
   return `
     <div class="modal-overlay" data-action="modal-overlay-close">
-      <div class="modal-box form-modal-box" data-stop-close="1">
+      <div class="modal-box fullscreen-embed-box" data-stop-close="1">
         <div class="modal-head">
           <div class="modal-title">${esc(title)}</div>
           <button class="modal-close" data-action="close-modal">✕</button>
         </div>
         <div class="form-embed-wrap">
-          <iframe src="${esc(url)}" width="100%" height="640" frameborder="0" marginheight="0" marginwidth="0">Loading…</iframe>
+          <iframe src="${esc(url)}" width="100%" frameborder="0" marginheight="0" marginwidth="0">Loading…</iframe>
         </div>
-        <div style="text-align:center; margin-top:10px;">
+        <div style="text-align:center; margin-top:10px; flex-shrink:0;">
           <a href="${esc(url)}" target="_blank" rel="noopener" style="font-size:12.5px; color:#45526b;">Blank or not loading? Some sites don't allow this — open it in a new tab instead ↗</a>
         </div>
       </div>
@@ -2054,10 +2083,28 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!name) { alert("Please enter a folder name."); return; }
       const teacher = state.data.teachers.find((t) => t.id === state.activeTeacherId);
       if (!teacher) return;
-      await createCustomFolder(teacher.id, teacher.name, name);
+      await createCustomFolder(teacher.id, teacher.name, name, el.dataset.parent || "");
       return;
     }
     if (action === "remove-custom-folder") { await removeCustomFolder(el.dataset.id); return; }
+    if (action === "drive-nav-into") {
+      const folder = state.data.customFolders.find((f) => f.id === el.dataset.id);
+      if (!folder) return;
+      if (!state.driveNav || state.driveNav.teacherId !== state.activeTeacherId) {
+        state.driveNav = { teacherId: state.activeTeacherId, path: [] };
+      }
+      state.driveNav.path.push({ driveFolderId: folder.driveFolderId, name: folder.folderName, url: folder.folderUrl });
+      return render();
+    }
+    if (action === "drive-nav-root") {
+      if (state.driveNav) state.driveNav.path = [];
+      return render();
+    }
+    if (action === "drive-nav-crumb") {
+      const idx = parseInt(el.dataset.index, 10);
+      if (state.driveNav) state.driveNav.path = state.driveNav.path.slice(0, idx + 1);
+      return render();
+    }
     if (action === "add-link") {
       const titleInput = document.getElementById("new-link-title");
       const urlInput = document.getElementById("new-link-url");
