@@ -1,6 +1,6 @@
 // ---------- Constants ----------
 // PASTE YOUR APPS SCRIPT WEB APP URL HERE (from Deploy > New deployment)
-const BACKEND_URL = "https://script.google.com/macros/s/AKfycbwsUMkWgcgsdrEBWkZyhPpuODPn4CIJwOOTodWfafnSIHx6VEvK9ogtvNqMUQhZwU-vdw/exec";
+const BACKEND_URL = "https://script.google.com/macros/s/AKfycbwg8Ewe8O2fyb_HN87zvKafdLiPRdMNCrwd2b6-2Q_3rQ1xYRKZCA4qWUDkHZIO4zlcTw/exec";
 
 // Put your welcome sound file (e.g. "audio/welcome.mp3") in your project folder,
 // then update this path if needed. If the file is missing, playback just silently
@@ -595,6 +595,42 @@ async function addTeacher(teacher) {
   showToast(res && res.success ? "Teacher added" : "Failed to add teacher");
 }
 
+// Editing is optimistic (revert on failure) except the photo isn't shown as "saved"
+// until the real Drive-hosted URL comes back, since we only have a local data: URL
+// for it until then.
+async function updateTeacher(id, teacher) {
+  const target = state.data.teachers.find((t) => t.id === id);
+  const prevSnapshot = target ? { ...target } : null;
+  const pickedNewPhoto = teacher.photo && teacher.photo.startsWith("data:");
+  if (target) {
+    target.name = teacher.name;
+    target.subject = teacher.subject;
+    target.phone = teacher.phone;
+    if (pickedNewPhoto) target.photo = teacher.photo;
+  }
+  state.saveError = "";
+  render();
+
+  const res = await apiPost({
+    action: "updateTeacher",
+    teacherId: id,
+    name: teacher.name,
+    subject: teacher.subject,
+    phone: teacher.phone,
+    photoBase64: pickedNewPhoto ? teacher.photo : undefined,
+    photoMime: pickedNewPhoto ? teacher.photo.substring(5, teacher.photo.indexOf(";")) : undefined,
+  });
+
+  if (res && res.success) {
+    if (target && res.photoUrl) target.photo = res.photoUrl;
+  } else {
+    if (target && prevSnapshot) Object.assign(target, prevSnapshot);
+    state.saveError = "Could not update teacher: " + (res && res.error ? res.error : "please try again.");
+  }
+  render();
+  showToast(res && res.success ? "Teacher updated" : "Failed to update teacher");
+}
+
 async function removeTeacher(id) {
   const res = await apiPost({ action: "removeTeacher", teacherId: id });
   if (res && res.success) {
@@ -1073,6 +1109,7 @@ function renderHome() {
 
 function renderTeacherCard(t) {
   const docCount = state.data.documents.filter((d) => d.teacherId === t.id).length;
+  const isPrincipal = state.adminMode && !state.session;
   return `
     <div class="card">
       <div class="ring"><div class="avatar">${t.photo ? `<img src="${driveThumb(t.photo, 160)}" alt="${esc(t.name)}" loading="lazy" />` : `<span class="avatar-letter">${esc((t.name || "?")[0])}</span>`}</div></div>
@@ -1084,6 +1121,7 @@ function renderTeacherCard(t) {
       <div class="card-actions">
         ${t.phone ? `<a href="tel:${esc(t.phone)}" class="btn btn-accent">📞 Call</a>` : ""}
         <button class="btn btn-dark" data-action="open-folder" data-id="${t.id}">📁 Folder</button>
+        ${isPrincipal ? `<button class="btn btn-tab btn-sm" data-action="open-edit-teacher" data-id="${t.id}">✏️ Edit</button>` : ""}
       </div>
     </div>
   `;
@@ -1435,6 +1473,7 @@ function renderFolder(teacher) {
         <div class="folder-subject">${esc(teacher.subject || "")}</div>
       </div>
       ${teacher.phone ? `<a href="tel:${esc(teacher.phone)}" class="btn btn-accent">📞 Call ${esc(teacher.phone)}</a>` : ""}
+      ${(isPrincipal || canUpload) ? `<button class="btn btn-tab btn-sm" data-action="open-edit-teacher" data-id="${teacher.id}">✏️ Edit Details</button>` : ""}
       ${isPrincipal ? `<button class="btn btn-danger" data-action="remove-teacher" data-id="${teacher.id}">🗑 Remove</button>` : ""}
     </div>
 
@@ -1769,11 +1808,12 @@ function renderExternalEmbedModal(url, title) {
 
 function renderAddTeacherModal() {
   const photo = state.modal.photo || null;
+  const isEditing = !!state.modal.editingTeacherId;
   return `
     <div class="modal-overlay" data-action="modal-overlay-close">
       <div class="modal-box" data-stop-close="1">
         <div class="modal-head">
-          <div class="modal-title">Add Teacher</div>
+          <div class="modal-title">${isEditing ? "Edit Teacher" : "Add Teacher"}</div>
           <button class="modal-close" data-action="close-modal">✕</button>
         </div>
         <div class="photo-picker">
@@ -1787,7 +1827,8 @@ function renderAddTeacherModal() {
           <div><label>Subject / Class</label><input id="at-subject" placeholder="e.g. Class III, Dzongkha" value="${esc(state.modal.subject || "")}" /></div>
           <div><label>Phone Number</label><input id="at-phone" placeholder="e.g. 17123456" value="${esc(state.modal.phone || "")}" /></div>
         </div>
-        <button class="btn btn-dark" style="width:100%; justify-content:center; margin-top:18px;" data-action="submit-add-teacher">Add Teacher</button>
+        ${isEditing ? `<div style="font-size:12px; color:#9aa2b1; margin-top:8px;">Changing the name also renames their Google Drive folder, so existing files stay linked.</div>` : ""}
+        <button class="btn btn-dark" style="width:100%; justify-content:center; margin-top:18px;" data-action="submit-add-teacher">${isEditing ? "Save Changes" : "Add Teacher"}</button>
       </div>
     </div>
   `;
@@ -1911,7 +1952,7 @@ function runBootLoader() {
   const percentEl = document.getElementById("boot-percent");
   const barFill = document.getElementById("boot-bar-fill");
   if (!overlay) return;
-  const duration = 1000;
+  const duration = 2000;
   const start = performance.now();
   function tick(now) {
     const elapsed = now - start;
@@ -2144,14 +2185,30 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
+    if (action === "open-edit-teacher") {
+      const teacher = state.data.teachers.find((t) => t.id === el.dataset.id);
+      if (!teacher) return;
+      state.modal = {
+        type: "addTeacher",
+        editingTeacherId: teacher.id,
+        name: teacher.name, subject: teacher.subject, phone: teacher.phone, photo: teacher.photo,
+      };
+      return render();
+    }
+
     if (action === "submit-add-teacher") {
       const name = document.getElementById("at-name").value.trim();
       if (!name) return;
       const subject = document.getElementById("at-subject").value.trim();
       const phone = document.getElementById("at-phone").value.trim();
       const photo = state.modal.photo || null;
+      const editingTeacherId = state.modal.editingTeacherId;
       state.modal = null;
-      await addTeacher({ name, subject, phone, photo });
+      if (editingTeacherId) {
+        await updateTeacher(editingTeacherId, { name, subject, phone, photo });
+      } else {
+        await addTeacher({ name, subject, phone, photo });
+      }
       return;
     }
 
