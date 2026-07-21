@@ -1947,6 +1947,7 @@ function renderNoticeModal(overdueItems, feedbackDocs, leaveNotices, todRemarkNo
 }
 
 // ---------- Boot loader (purely cosmetic — always takes ~1s, independent of actual data load time) ----------
+function runBootLoader() {
   const overlay = document.getElementById("boot-loader");
   const percentEl = document.getElementById("boot-percent");
   const barFill = document.getElementById("boot-bar-fill");
