@@ -124,7 +124,7 @@ header.top {
 }
 .header-brand { display: flex; align-items: center; gap: 14px; }
 .header-logo {
-  width: 52px; height: 52px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
+  width: 60px; height: 60px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
   background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.35);
   box-shadow: 0 4px 14px rgba(0,0,0,0.25);
 }
@@ -266,7 +266,7 @@ main { max-width: 980px; margin: 0 auto; padding: 24px 20px 60px; animation: vie
 
 .hero-logo {
   position: absolute; top: 0; left: 50%; transform: translate(-50%, -50%);
-  width: 84px; height: 84px; border-radius: 50%; object-fit: cover;
+  width: 100px; height: 100px; border-radius: 50%; object-fit: cover;
   background: #0a1530; border: 3px solid rgba(255,255,255,0.85);
   box-shadow: 0 10px 28px rgba(10,21,48,0.5);
 }
@@ -286,7 +286,7 @@ main { max-width: 980px; margin: 0 auto; padding: 24px 20px 60px; animation: vie
 }
 #boot-loader.boot-loader-hide { opacity: 0; pointer-events: none; }
 .boot-logo {
-  width: 120px; height: 120px; border-radius: 50%; object-fit: cover;
+  width: 150px; height: 150px; border-radius: 50%; object-fit: cover;
   background: #0a1530; border: 3px solid rgba(255,255,255,0.85);
   box-shadow: 0 10px 28px rgba(10,21,48,0.5);
   margin-bottom: 18px;
