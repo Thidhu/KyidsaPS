@@ -976,8 +976,8 @@ function render() {
             ? `<button class="btn btn-ghost" data-action="logout">↩ Log out</button>`
             : `
               <button class="btn btn-ghost" data-action="set-view" data-view="home">🏠 Home</button>
-              <button class="btn btn-ghost" data-action="open-teacher-login">🔓 I'm a Teacher</button>
-              <button class="btn ${state.adminMode ? "btn-accent" : "btn-ghost"}" data-action="toggle-admin">🛡 ${state.adminMode ? "Admin Mode: On" : "Admin Mode"}</button>
+              <button class="btn btn-ghost" data-action="open-teacher-login">🔓 Teacher</button>
+              <button class="btn ${state.adminMode ? "btn-accent" : "btn-ghost"}" data-action="toggle-admin">🛡 ${state.adminMode ? "Admin/Principal Mode: On" : "Admin/Principal Mode"}</button>
             `}
           <button class="btn btn-ghost" data-action="toggle-audio" title="${state.audioMuted ? "Turn sound on" : "Turn sound off"}">${state.audioMuted ? "🔇" : "🔊"}</button>
         </div>
@@ -1067,7 +1067,7 @@ function renderHome() {
   return `
     <div class="hero-panel">
       <img class="hero-logo" src="${esc(LOGO_URL)}" alt="Kyidsa Primary School logo" onerror="this.style.display='none'" />
-      <h2 class="serif" style="font-size:24px; margin:0 0 6px;">Kyidsa Primary School Portal</h2>
+      <h2 class="serif" style="font-size:24px; margin:0 0 6px;"> Digital Space<br>Kyidsa Primary School</h2>
       <div style="font-size:13.5px; color:#dfe4f0; margin-bottom:20px;">Everything the school needs, in one place.</div>
       <button class="btn btn-ghost" data-action="set-view" data-view="directory">👩‍🏫 Go to Teacher Directory</button>
     </div>
@@ -1077,7 +1077,7 @@ function renderHome() {
     <div class="home-actions">
       <button class="action-card" data-action="open-teacher-login">
         <span class="action-icon">🔓</span>
-        <span class="action-label">I'm a Teacher</span>
+        <span class="action-label">Teacher</span>
         <span class="action-sub">Log in for Attendance, TOD Report &amp; Leave</span>
       </button>
       <button class="action-card" data-action="open-external" data-url="${esc(TIMETABLE_GENERATOR_URL)}" data-title="Timetable Generator">
