@@ -14,6 +14,17 @@ const LOGO_URL = "images/logo.png";
 
 const CATEGORY_LABEL = { lessonPlan: "Lesson Plan", otherDocuments: "Other Document" };
 
+const CLASS_OPTIONS = ["Class PP", "Class I", "Class II", "Class III", "Class IV", "Class V", "Class VI"];
+const SUBJECT_OPTIONS = ["English", "Dzongkha", "Mathematics", "Science", "ICT", "DTI", "Arts", "HPE"];
+
+// Builds <option> tags for a fixed list, plus the currently-saved value if it's
+// something outside the list (e.g. was typed in before this became a dropdown) —
+// so nobody's existing data silently disappears or gets reset.
+function selectOptionsHtml(options, currentValue) {
+  const list = currentValue && !options.includes(currentValue) ? [currentValue, ...options] : options;
+  return `<option value="">Select…</option>` + list.map((o) => `<option value="${esc(o)}" ${o === currentValue ? "selected" : ""}>${esc(o)}</option>`).join("");
+}
+
 // Edit these to point at your actual links — shown on the Home page
 const PORTFOLIO_LINKS = [
   { label: "School Records (Google Drive)", url: "Coming Soon!!!", icon: "📁" },
@@ -977,7 +988,7 @@ function render() {
             : `
               <button class="btn btn-ghost" data-action="set-view" data-view="home">🏠 Home</button>
               <button class="btn btn-ghost" data-action="open-teacher-login">🔓 Teacher</button>
-              <button class="btn ${state.adminMode ? "btn-accent" : "btn-ghost"}" data-action="toggle-admin">🛡 ${state.adminMode ? "Admin/Principal Mode: On" : "Admin/Principal Mode"}</button>
+              <button class="btn ${state.adminMode ? "btn-accent" : "btn-ghost"}" data-action="toggle-admin">🛡 ${state.adminMode ? "Admin Mode: On" : "Admin Mode"}</button>
             `}
           <button class="btn btn-ghost" data-action="toggle-audio" title="${state.audioMuted ? "Turn sound on" : "Turn sound off"}">${state.audioMuted ? "🔇" : "🔊"}</button>
         </div>
@@ -1067,7 +1078,7 @@ function renderHome() {
   return `
     <div class="hero-panel">
       <img class="hero-logo" src="${esc(LOGO_URL)}" alt="Kyidsa Primary School logo" onerror="this.style.display='none'" />
-      <h2 class="serif" style="font-size:24px; margin:0 0 6px;"> Digital Space<br>Kyidsa Primary School</h2>
+      <h2 class="serif" style="font-size:24px; margin:0 0 6px;">Digital Space<br> Kyidsa PS</h2>
       <div style="font-size:13.5px; color:#dfe4f0; margin-bottom:20px;">Everything the school needs, in one place.</div>
       <button class="btn btn-ghost" data-action="set-view" data-view="directory">👩‍🏫 Go to Teacher Directory</button>
     </div>
@@ -1656,11 +1667,11 @@ function renderUploadBox() {
           <div class="upload-field" id="staged-lp-fields" style="${p.category === "lessonPlan" ? "display:flex; gap:10px;" : "display:none;"}">
             <div>
               <label>Class</label>
-              <input type="text" id="staged-class" value="${esc(p.docClass || "")}" placeholder="e.g. Class III" ${state.busyUpload ? "disabled" : ""} />
+              <select id="staged-class" ${state.busyUpload ? "disabled" : ""}>${selectOptionsHtml(CLASS_OPTIONS, p.docClass || "")}</select>
             </div>
             <div>
               <label>Subject</label>
-              <input type="text" id="staged-subject" value="${esc(p.docSubject || "")}" placeholder="e.g. Dzongkha" ${state.busyUpload ? "disabled" : ""} />
+              <select id="staged-subject" ${state.busyUpload ? "disabled" : ""}>${selectOptionsHtml(SUBJECT_OPTIONS, p.docSubject || "")}</select>
             </div>
           </div>
           <div class="upload-field" id="staged-doc-name-field" style="${p.category === "otherDocuments" ? "" : "display:none;"}">
@@ -1693,11 +1704,11 @@ function renderUploadBox() {
         <div class="upload-field" id="lp-fields" style="display:flex; gap:10px;">
           <div>
             <label>Class</label>
-            <input type="text" id="upload-class" placeholder="e.g. Class III" />
+            <select id="upload-class">${selectOptionsHtml(CLASS_OPTIONS, "")}</select>
           </div>
           <div>
             <label>Subject</label>
-            <input type="text" id="upload-subject" placeholder="e.g. Dzongkha" />
+            <select id="upload-subject">${selectOptionsHtml(SUBJECT_OPTIONS, "")}</select>
           </div>
         </div>
         <div class="upload-field" id="doc-name-field" style="display:none;">
@@ -1952,7 +1963,7 @@ function runBootLoader() {
   const percentEl = document.getElementById("boot-percent");
   const barFill = document.getElementById("boot-bar-fill");
   if (!overlay) return;
-  const duration = 1000;
+  const duration = 2000;
   const start = performance.now();
   function tick(now) {
     const elapsed = now - start;
