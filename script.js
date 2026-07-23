@@ -15,7 +15,7 @@ const LOGO_URL = "images/logo.png";
 const CATEGORY_LABEL = { lessonPlan: "Lesson Plan", otherDocuments: "Other Document" };
 
 const CLASS_OPTIONS = ["Class PP", "Class I", "Class II", "Class III", "Class IV", "Class V", "Class VI"];
-const SUBJECT_OPTIONS = ["English", "Dzongkha", "Mathematics", "Science", "ICT", "Science & Technology", "DTI", "Arts", "HPE"];
+const SUBJECT_OPTIONS = ["English", "Dzongkha", "Mathematics", "Science", "ICT", "DTI", "Science & Technology", "Arts", "HPE"];
 
 // Builds <option> tags for a fixed list, plus the currently-saved value if it's
 // something outside the list (e.g. was typed in before this became a dropdown) —
@@ -23,6 +23,15 @@ const SUBJECT_OPTIONS = ["English", "Dzongkha", "Mathematics", "Science", "ICT",
 function selectOptionsHtml(options, currentValue) {
   const list = currentValue && !options.includes(currentValue) ? [currentValue, ...options] : options;
   return `<option value="">Select…</option>` + list.map((o) => `<option value="${esc(o)}" ${o === currentValue ? "selected" : ""}>${esc(o)}</option>`).join("");
+}
+
+// Only compacts genuinely short columns (Timestamp, or a column that's EXACTLY
+// "Day" e.g. a day-of-week answer) — deliberately does NOT match "Day's Activity"
+// or similar free-text columns, which need room to actually show what was written.
+function tableColumnClass(header) {
+  if (/^timestamp$|^day$/i.test(header)) return "col-compact";
+  if (/name/i.test(header)) return "col-name";
+  return "col-content";
 }
 
 // Edit these to point at your actual links — shown on the Home page
@@ -81,6 +90,7 @@ const state = {
   busyUpload: false,
   pendingUpload: null, // { category, docName, fileName, mimeType, dataUrl } — staged, not yet submitted
   audioMuted: false,
+  directorySearch: "",
 };
 
 // ---------- Decorative page-wide twinkling stars (injected once, lives outside #app so re-renders don't touch it) ----------
@@ -253,6 +263,105 @@ function fmtDate(d) {
 function esc(str) {
   if (str == null) return "";
   return String(str).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+// ---------- Export / Print (Attendance & TOD tables) ----------
+// Always pulls the FULL underlying dataset, not just whatever subset is currently
+// shown on screen (the on-screen table may be narrowed to "today" for readability,
+// but export/print is for record-keeping so it should include everything, unless
+// a date range is chosen).
+function exportSourceRows(source) {
+  if (source === "attendance") return { rows: state.data.attendanceResponses, title: "Attendance Records" };
+  if (source === "tod") return { rows: state.data.todResponses, title: "Day's Activity (TOD Reports)" };
+  return { rows: [], title: "Export" };
+}
+
+// fromStr/toStr are "YYYY-MM-DD" (native <input type="date"> format) or empty/null for open-ended.
+// Rows with a Timestamp that can't be parsed are kept rather than silently dropped.
+function filterRowsByDateRange(rows, fromStr, toStr) {
+  if (!fromStr && !toStr) return rows;
+  const cols = [];
+  rows.forEach((r) => Object.keys(r).forEach((k) => { if (!cols.includes(k)) cols.push(k); }));
+  const tsCol = cols.find((c) => /timestamp/i.test(c));
+  if (!tsCol) return rows;
+  const from = fromStr ? startOfDay(new Date(fromStr + "T00:00:00")) : null;
+  const to = toStr ? startOfDay(new Date(toStr + "T00:00:00")) : null;
+  return rows.filter((r) => {
+    const d = parseSheetTimestamp(r[tsCol]);
+    if (!d) return true;
+    const day = startOfDay(d);
+    if (from && day < from) return false;
+    if (to && day > to) return false;
+    return true;
+  });
+}
+
+function rowsToCsv(rows) {
+  const cols = [];
+  rows.forEach((r) => Object.keys(r).forEach((k) => { if (!cols.includes(k)) cols.push(k); }));
+  const cell = (val) => {
+    const s = String(val ?? "");
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  return [cols.map(cell).join(",")].concat(rows.map((r) => cols.map((c) => cell(r[c])).join(","))).join("\n");
+}
+
+function exportTableCsv(source, fromStr, toStr) {
+  const { rows: allRows, title } = exportSourceRows(source);
+  const rows = filterRowsByDateRange(allRows, fromStr, toStr);
+  if (!rows || rows.length === 0) { alert("No records in that date range."); return; }
+  const csv = rowsToCsv(rows);
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  const rangeLabel = fromStr || toStr ? `_${fromStr || "start"}_to_${toStr || "end"}` : "";
+  a.download = `${title.replace(/[^a-z0-9]+/gi, "_")}${rangeLabel}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function printTable(source, fromStr, toStr) {
+  const { rows: allRows, title } = exportSourceRows(source);
+  const rows = filterRowsByDateRange(allRows, fromStr, toStr);
+  if (!rows || rows.length === 0) { alert("No records in that date range."); return; }
+  const cols = [];
+  rows.forEach((r) => Object.keys(r).forEach((k) => { if (!cols.includes(k)) cols.push(k); }));
+  const tsCol = cols.find((c) => /timestamp/i.test(c));
+  const sorted = tsCol
+    ? [...rows].sort((a, b) => (parseSheetTimestamp(b[tsCol]) || 0) - (parseSheetTimestamp(a[tsCol]) || 0))
+    : rows;
+
+  const win = window.open("", "_blank");
+  if (!win) { alert("Please allow pop-ups for this site to print."); return; }
+  const rangeLabel = fromStr || toStr ? ` (${fromStr ? fmtDate(fromStr) : "…"} – ${toStr ? fmtDate(toStr) : "…"})` : "";
+  const rowsHtml = sorted.map((r) => `<tr>${cols.map((c) => `<td>${esc(r[c] ?? "")}</td>`).join("")}</tr>`).join("");
+  win.document.write(`
+    <html>
+      <head>
+        <title>${esc(title)}</title>
+        <style>
+          body { font-family: Arial, Helvetica, sans-serif; padding: 24px; color: #1e2733; }
+          h1 { font-size: 18px; margin: 0 0 2px; }
+          .meta { font-size: 12px; color: #666; margin-bottom: 18px; }
+          table { border-collapse: collapse; width: 100%; }
+          th, td { border: 1px solid #ccc; padding: 6px 8px; font-size: 11.5px; text-align: left; vertical-align: top; }
+          th { background: #f0f1f4; }
+          @media print { body { padding: 0; } }
+        </style>
+      </head>
+      <body>
+        <h1>${esc(title)}${esc(rangeLabel)} — Kyidsa Primary School</h1>
+        <div class="meta">Exported ${esc(new Date().toLocaleString())} · ${sorted.length} record${sorted.length === 1 ? "" : "s"}</div>
+        <table><thead><tr>${cols.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${rowsHtml}</tbody></table>
+      </body>
+    </html>
+  `);
+  win.document.close();
+  win.focus();
+  win.print();
 }
 
 // ---------- Attendance daily summary ----------
@@ -972,6 +1081,15 @@ function render() {
 
   document.body.classList.toggle("home-view", state.view === "home");
 
+  // The whole #app subtree gets replaced below, which would normally yank focus
+  // out of whatever input the person is actively typing in (e.g. the directory
+  // search box) on every keystroke. Remember it, and restore it after.
+  const activeEl = document.activeElement;
+  const hadFocus = activeEl && activeEl.id && app.contains(activeEl);
+  const focusedId = hadFocus ? activeEl.id : null;
+  const selStart = hadFocus && "selectionStart" in activeEl ? activeEl.selectionStart : null;
+  const selEnd = hadFocus && "selectionEnd" in activeEl ? activeEl.selectionEnd : null;
+
   app.innerHTML = `
     <header class="top">
       <div class="header-inner">
@@ -987,7 +1105,7 @@ function render() {
             ? `<button class="btn btn-ghost" data-action="logout">↩ Log out</button>`
             : `
               <button class="btn btn-ghost" data-action="set-view" data-view="home">🏠 Home</button>
-              <button class="btn btn-ghost" data-action="open-teacher-login">🔓 Teacher</button>
+              <button class="btn btn-ghost" data-action="open-teacher-login">🔓 I'm a Teacher</button>
               <button class="btn ${state.adminMode ? "btn-accent" : "btn-ghost"}" data-action="toggle-admin">🛡 ${state.adminMode ? "Admin Mode: On" : "Admin Mode"}</button>
             `}
           <button class="btn btn-ghost" data-action="toggle-audio" title="${state.audioMuted ? "Turn sound on" : "Turn sound off"}">${state.audioMuted ? "🔇" : "🔊"}</button>
@@ -1005,6 +1123,16 @@ function render() {
     ${state.modal ? renderModal() : ""}
     ${state.toast ? `<div class="toast">${esc(state.toast)}</div>` : ""}
   `;
+
+  if (focusedId) {
+    const el = document.getElementById(focusedId);
+    if (el) {
+      el.focus();
+      if (selStart !== null && selEnd !== null && "setSelectionRange" in el) {
+        try { el.setSelectionRange(selStart, selEnd); } catch (e) { /* not applicable to this input type */ }
+      }
+    }
+  }
 }
 
 function renderTabs() {
@@ -1018,13 +1146,26 @@ function renderTabs() {
 }
 
 function renderDirectory() {
-  const teachers = state.data.teachers;
+  const allTeachers = state.data.teachers;
+  const query = (state.directorySearch || "").trim().toLowerCase();
+  const teachers = query
+    ? allTeachers.filter((t) => `${t.name} ${t.subject || ""}`.toLowerCase().includes(query))
+    : allTeachers;
   return `
     <div class="section-head">
       <h2 class="serif" style="font-size:20px; margin:0; color:#4A3B22;">Teachers</h2>
       ${state.adminMode ? `<button class="btn btn-dark" data-action="open-add-teacher">➕ Add Teacher</button>` : ""}
     </div>
-    ${teachers.length === 0 ? renderEmptyState() : `<div class="grid">${teachers.map(renderTeacherCard).join("")}</div>`}
+    ${allTeachers.length > 0 ? `
+      <div class="directory-search">
+        <input type="text" id="directory-search-input" placeholder="🔍 Search by name or subject…" value="${esc(state.directorySearch || "")}" />
+      </div>
+    ` : ""}
+    ${allTeachers.length === 0
+      ? renderEmptyState()
+      : teachers.length === 0
+        ? `<div class="doc-empty" style="text-align:center; padding:30px;">No teachers match "${esc(state.directorySearch)}".</div>`
+        : `<div class="grid">${teachers.map(renderTeacherCard).join("")}</div>`}
   `;
 }
 
@@ -1078,7 +1219,7 @@ function renderHome() {
   return `
     <div class="hero-panel">
       <img class="hero-logo" src="${esc(LOGO_URL)}" alt="Kyidsa Primary School logo" onerror="this.style.display='none'" />
-      <h2 class="serif" style="font-size:24px; margin:0 0 6px;">Digital Space<br> Kyidsa PS</h2>
+      <h2 class="serif" style="font-size:24px; margin:0 0 6px;">Kyidsa Primary School Portal</h2>
       <div style="font-size:13.5px; color:#dfe4f0; margin-bottom:20px;">Everything the school needs, in one place.</div>
       <button class="btn btn-ghost" data-action="set-view" data-view="directory">👩‍🏫 Go to Teacher Directory</button>
     </div>
@@ -1088,7 +1229,7 @@ function renderHome() {
     <div class="home-actions">
       <button class="action-card" data-action="open-teacher-login">
         <span class="action-icon">🔓</span>
-        <span class="action-label">Teacher</span>
+        <span class="action-label">I'm a Teacher</span>
         <span class="action-sub">Log in for Attendance, TOD Report &amp; Leave</span>
       </button>
       <button class="action-card" data-action="open-external" data-url="${esc(TIMETABLE_GENERATOR_URL)}" data-title="Timetable Generator">
@@ -1149,7 +1290,7 @@ function otherDocsPillHtml(status) {
   return `<span class="pill pill-ok">✅ On track</span>`;
 }
 
-function renderResponseTable(title, icon, rows, emptyMessage) {
+function renderResponseTable(title, icon, rows, emptyMessage, exportAction) {
   if (!rows || rows.length === 0) {
     return `
       <div class="doc-section" style="margin-top:22px;">
@@ -1165,7 +1306,6 @@ function renderResponseTable(title, icon, rows, emptyMessage) {
   rows.forEach((r) => Object.keys(r).forEach((k) => { if (!colSet.includes(k)) colSet.push(k); }));
   const tsCol = colSet.find((c) => /timestamp/i.test(c));
   const cols = tsCol ? [tsCol, ...colSet.filter((c) => c !== tsCol)] : colSet;
-  const compactRegex = /timestamp|\bday\b/i;
   const sorted = tsCol
     ? [...rows].sort((a, b) => (parseSheetTimestamp(b[tsCol]) || 0) - (parseSheetTimestamp(a[tsCol]) || 0))
     : [...rows].reverse();
@@ -1176,12 +1316,18 @@ function renderResponseTable(title, icon, rows, emptyMessage) {
       <div class="doc-section-head">
         <span>${icon} ${esc(title)}</span>
         <span class="count">(${rows.length}${rows.length > 100 ? " — showing latest 100" : ""})</span>
+        ${exportAction ? `
+          <div style="display:flex; gap:6px; margin-left:auto;">
+            <button class="btn btn-tab btn-sm" data-action="export-csv" data-source="${exportAction}">⬇️ CSV</button>
+            <button class="btn btn-tab btn-sm" data-action="print-table" data-source="${exportAction}">🖨️ Print</button>
+          </div>
+        ` : ""}
       </div>
       <div class="dash-table-wrap" style="overflow-x:auto;">
         <table>
-          <thead><tr>${cols.map((c) => `<th class="${compactRegex.test(c) ? "col-compact" : ""}">${esc(c)}</th>`).join("")}</tr></thead>
+          <thead><tr>${cols.map((c) => `<th class="${tableColumnClass(c)}">${esc(c)}</th>`).join("")}</tr></thead>
           <tbody>
-            ${shown.map((r) => `<tr>${cols.map((c) => `<td class="${compactRegex.test(c) ? "col-compact" : ""}">${esc(r[c] ?? "")}</td>`).join("")}</tr>`).join("")}
+            ${shown.map((r) => `<tr>${cols.map((c) => `<td class="${tableColumnClass(c)}">${esc(r[c] ?? "")}</td>`).join("")}</tr>`).join("")}
           </tbody>
         </table>
       </div>
@@ -1298,8 +1444,6 @@ function renderTodReportsTable(rows, todRemarks) {
   rows.forEach((r) => Object.keys(r).forEach((k) => { if (!colSet.includes(k)) colSet.push(k); }));
   const { tsCol, nameCol } = todCols(rows);
   const cols = tsCol ? [tsCol, ...colSet.filter((c) => c !== tsCol)] : colSet;
-  const compactRegex = /timestamp|\bday\b/i;
-  const nameRegex = /name/i;
   const sorted = tsCol
     ? [...rows].sort((a, b) => (parseSheetTimestamp(b[tsCol]) || 0) - (parseSheetTimestamp(a[tsCol]) || 0))
     : [...rows].reverse();
@@ -1310,11 +1454,15 @@ function renderTodReportsTable(rows, todRemarks) {
       <div class="doc-section-head">
         <span>📝 Day's Activity (TOD Reports)</span>
         <span class="count">(${rows.length}${rows.length > 100 ? " — showing latest 100" : ""})</span>
+        <div style="display:flex; gap:6px; margin-left:auto;">
+          <button class="btn btn-tab btn-sm" data-action="export-csv" data-source="tod">⬇️ CSV</button>
+          <button class="btn btn-tab btn-sm" data-action="print-table" data-source="tod">🖨️ Print</button>
+        </div>
       </div>
       <div class="dash-table-wrap" style="overflow-x:auto;">
         <table>
           <thead><tr>
-            ${cols.map((c) => `<th class="${compactRegex.test(c) ? "col-compact" : nameRegex.test(c) ? "col-name" : ""}" title="${esc(c)}">${esc(c)}</th>`).join("")}
+            ${cols.map((c) => `<th class="${tableColumnClass(c)}" title="${esc(c)}">${esc(c)}</th>`).join("")}
             <th>Principal's Remark</th>
           </tr></thead>
           <tbody>
@@ -1322,7 +1470,7 @@ function renderTodReportsTable(rows, todRemarks) {
               const id = todRowId(r, tsCol, nameCol);
               return `
                 <tr>
-                  ${cols.map((c) => `<td class="${compactRegex.test(c) ? "col-compact" : nameRegex.test(c) ? "col-name" : ""}" title="${esc(r[c] ?? "")}">${esc(r[c] ?? "")}</td>`).join("")}
+                  ${cols.map((c) => `<td class="${tableColumnClass(c)}">${esc(r[c] ?? "")}</td>`).join("")}
                   <td style="white-space:normal; min-width:220px;">${todRemarkEditorHtml(id, todRemarks[id] || "")}</td>
                 </tr>
               `;
@@ -1393,7 +1541,7 @@ function renderDashboard() {
     </div>
 
     ${renderAttendanceSummary(attendanceToday)}
-    ${renderResponseTable("Attendance — Today", "📋", attendanceToday.todayRows, "No attendance submitted yet today.")}
+    ${renderResponseTable("Attendance — Today", "📋", attendanceToday.todayRows, "No attendance submitted yet today.", "attendance")}
     ${renderTodReportsTable(data.todResponses, data.todRemarks)}
     ${renderLeaveTable(data.leaveResponses, data.leaveStatuses)}
   `;
@@ -1502,8 +1650,8 @@ function renderFolder(teacher) {
     ${renderTeacherDriveSection(teacher, isPrincipal, canUpload)}
     ${renderTeacherLinksSection(teacher, isPrincipal, canUpload)}
 
-    ${docSectionHtml("Lesson Plans", lessonPlans, isPrincipal, false)}
-    ${docSectionHtml("Other Documents", otherDocs, isPrincipal, true)}
+    ${docSectionHtml("Lesson Plans", lessonPlans, isPrincipal || canUpload, false, isPrincipal)}
+    ${docSectionHtml("Other Documents", otherDocs, isPrincipal || canUpload, true, isPrincipal)}
   `;
 }
 
@@ -1722,7 +1870,7 @@ function renderUploadBox() {
   `;
 }
 
-function docSectionHtml(title, docs, canDelete, showDocName) {
+function docSectionHtml(title, docs, canDelete, showDocName, canComment) {
   return `
     <div class="doc-section">
       <div class="doc-section-head">
@@ -1738,7 +1886,7 @@ function docSectionHtml(title, docs, canDelete, showDocName) {
           </div>
           ${!showDocName && (d.docClass || d.docSubject) ? `<div class="doc-meta">🏫 ${esc(d.docClass || "—")} &nbsp;•&nbsp; 📘 ${esc(d.docSubject || "—")}</div>` : ""}
           ${d.comment ? `<div class="comment-display">💬 ${esc(d.comment)}</div>` : ""}
-          ${canDelete ? commentEditorHtml(d.id, d.comment) : ""}
+          ${canComment ? commentEditorHtml(d.id, d.comment) : ""}
         </div>
       `).join("")}
     </div>
@@ -1773,6 +1921,7 @@ function renderModal() {
   if (m.type === "notice") return renderNoticeModal(m.overdueItems, m.feedbackDocs, m.leaveNotices, m.todRemarkNotices);
   if (m.type === "formEmbed") return renderFormEmbedModal(m.url, m.title);
   if (m.type === "externalEmbed") return renderExternalEmbedModal(m.url, m.title);
+  if (m.type === "exportRange") return renderExportRangeModal(m.source);
   return "";
 }
 
@@ -1792,6 +1941,39 @@ function renderFormEmbedModal(url, title) {
         </div>
         <div style="text-align:center; margin-top:10px;">
           <a href="${esc(url)}" target="_blank" rel="noopener" style="font-size:12.5px; color:#45526b;">Trouble viewing the form? Open it in a new tab ↗</a>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderExportRangeModal(source) {
+  const { title } = exportSourceRows(source);
+  return `
+    <div class="modal-overlay" data-action="modal-overlay-close">
+      <div class="modal-box" data-stop-close="1" style="max-width:380px;">
+        <div class="modal-head">
+          <div class="modal-title">Export / Print</div>
+          <button class="modal-close" data-action="close-modal">✕</button>
+        </div>
+        <div class="modal-note" style="margin-bottom:14px;">${esc(title)} — pick a range, or leave both blank for everything.</div>
+        <div class="modal-fields">
+          <div>
+            <label>Quick range</label>
+            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+              <button class="btn btn-tab btn-sm" data-action="export-range-preset" data-preset="week">This Week</button>
+              <button class="btn btn-tab btn-sm" data-action="export-range-preset" data-preset="month">This Month</button>
+              <button class="btn btn-tab btn-sm" data-action="export-range-preset" data-preset="all">All Time</button>
+            </div>
+          </div>
+          <div style="display:flex; gap:10px;">
+            <div style="flex:1;"><label>From</label><input type="date" id="export-range-from" /></div>
+            <div style="flex:1;"><label>To</label><input type="date" id="export-range-to" /></div>
+          </div>
+        </div>
+        <div style="display:flex; gap:8px; margin-top:18px;">
+          <button class="btn btn-dark" style="flex:1; justify-content:center;" data-action="export-range-confirm" data-source="${source}" data-mode="csv">⬇️ Export CSV</button>
+          <button class="btn btn-tab" style="flex:1; justify-content:center;" data-action="export-range-confirm" data-source="${source}" data-mode="print">🖨️ Print</button>
         </div>
       </div>
     </div>
@@ -2085,6 +2267,42 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     if (action === "close-modal") { state.modal = null; return render(); }
 
+    if (action === "export-csv" || action === "print-table") {
+      state.modal = { type: "exportRange", source: el.dataset.source };
+      return render();
+    }
+    if (action === "export-range-preset") {
+      const preset = el.dataset.preset;
+      const fromInput = document.getElementById("export-range-from");
+      const toInput = document.getElementById("export-range-to");
+      const today = new Date();
+      const fmt = (d) => d.toISOString().slice(0, 10);
+      if (preset === "all") {
+        fromInput.value = "";
+        toInput.value = "";
+      } else if (preset === "week") {
+        const start = new Date(today);
+        start.setDate(start.getDate() - 6);
+        fromInput.value = fmt(start);
+        toInput.value = fmt(today);
+      } else if (preset === "month") {
+        const start = new Date(today.getFullYear(), today.getMonth(), 1);
+        fromInput.value = fmt(start);
+        toInput.value = fmt(today);
+      }
+      return;
+    }
+    if (action === "export-range-confirm") {
+      const source = el.dataset.source;
+      const mode = el.dataset.mode;
+      const fromStr = document.getElementById("export-range-from").value || "";
+      const toStr = document.getElementById("export-range-to").value || "";
+      state.modal = null;
+      render();
+      if (mode === "csv") exportTableCsv(source, fromStr, toStr);
+      else printTable(source, fromStr, toStr);
+      return;
+    }
     if (action === "close-notice") {
       const feedbackDocs = (state.modal && state.modal.feedbackDocs) || [];
       const leaveNotices = (state.modal && state.modal.leaveNotices) || [];
@@ -2336,6 +2554,10 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     if (e.target.id === "staged-subject" && state.pendingUpload) {
       state.pendingUpload.docSubject = e.target.value;
+    }
+    if (e.target.id === "directory-search-input") {
+      state.directorySearch = e.target.value;
+      render();
     }
   });
 
