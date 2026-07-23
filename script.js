@@ -15,7 +15,7 @@ const LOGO_URL = "images/logo.png";
 const CATEGORY_LABEL = { lessonPlan: "Lesson Plan", otherDocuments: "Other Document" };
 
 const CLASS_OPTIONS = ["Class PP", "Class I", "Class II", "Class III", "Class IV", "Class V", "Class VI"];
-const SUBJECT_OPTIONS = ["English", "Dzongkha", "Mathematics", "Science", "ICT", "DTI", "Arts", "HPE"];
+const SUBJECT_OPTIONS = ["English", "Dzongkha", "Mathematics", "Science", "ICT", "Science & Technology", "DTI", "Arts", "HPE"];
 
 // Builds <option> tags for a fixed list, plus the currently-saved value if it's
 // something outside the list (e.g. was typed in before this became a dropdown) —
