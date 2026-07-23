@@ -12,7 +12,7 @@ body {
   position: fixed; inset: 0; z-index: -2;
   background-image: linear-gradient(rgba(6,12,28,0.10), rgba(6,12,28,0.15)), url('images/school-bg.jpg');
   background-size: cover; background-position: center;
-  filter: blur(0px);
+  filter: blur(5px);
   transform: scale(1.08); /* hide blurred edge fringe */
   opacity: 0;
   transition: opacity 0.25s ease;
@@ -32,6 +32,7 @@ button { font-family: inherit; cursor: pointer; }
   display: inline-flex; align-items: center; gap: 6px;
   transition: transform 0.08s ease, opacity 0.15s ease, box-shadow 0.18s ease, filter 0.15s ease, background 0.2s ease, color 0.2s ease;
 }
+.btn-sm { padding: 4px 9px; font-size: 11.5px; gap: 4px; border-radius: 6px; }
 .btn:active { transform: scale(0.97); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; }
 .btn-dark {
@@ -104,6 +105,9 @@ th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: 
   width: 1%; max-width: 120px; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis;
 }
+.dash-table-wrap th.col-content, .dash-table-wrap td.col-content {
+  white-space: normal; word-break: break-word; min-width: 220px; max-width: 480px;
+}
 
 /* Custom slim scrollbar for the horizontally-scrolling table wrapper */
 .dash-table-wrap [style*="overflow-x:auto"] { scrollbar-width: thin; scrollbar-color: #a48327 transparent; }
@@ -124,7 +128,7 @@ header.top {
 }
 .header-brand { display: flex; align-items: center; gap: 14px; }
 .header-logo {
-  width: 60px; height: 60px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
+  width: 52px; height: 52px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
   background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.35);
   box-shadow: 0 4px 14px rgba(0,0,0,0.25);
 }
@@ -146,6 +150,12 @@ main { max-width: 980px; margin: 0 auto; padding: 24px 20px 60px; animation: vie
 
 .section-head {
   display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;
+}
+
+.directory-search { margin-bottom: 16px; }
+.directory-search input {
+  width: 100%; padding: 11px 14px; font-size: 14px; border-radius: 10px;
+  border: 1px solid rgba(20,33,61,0.14); background: rgba(255,255,255,0.7);
 }
 
 .grid {
@@ -213,7 +223,7 @@ main { max-width: 980px; margin: 0 auto; padding: 24px 20px 60px; animation: vie
 .upload-field { min-width: 180px; }
 
 .doc-section { margin-bottom: 22px; }
-.doc-section-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; color: #1e2733; font-weight: 700; }
+.doc-section-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; color: #1e2733; font-weight: 700; flex-wrap: wrap; }
 .doc-section-head span:first-child { font-family: 'Fraunces', serif; font-size: 15.5px; letter-spacing: 0.01em; }
 .doc-section-head .count {
   font-size: 11px; color: #45526b; font-weight: 600; background: rgba(20,33,61,0.07);
@@ -266,7 +276,7 @@ main { max-width: 980px; margin: 0 auto; padding: 24px 20px 60px; animation: vie
 
 .hero-logo {
   position: absolute; top: 0; left: 50%; transform: translate(-50%, -50%);
-  width: 100px; height: 100px; border-radius: 50%; object-fit: cover;
+  width: 84px; height: 84px; border-radius: 50%; object-fit: cover;
   background: #0a1530; border: 3px solid rgba(255,255,255,0.85);
   box-shadow: 0 10px 28px rgba(10,21,48,0.5);
 }
@@ -286,7 +296,7 @@ main { max-width: 980px; margin: 0 auto; padding: 24px 20px 60px; animation: vie
 }
 #boot-loader.boot-loader-hide { opacity: 0; pointer-events: none; }
 .boot-logo {
-  width: 150px; height: 150px; border-radius: 50%; object-fit: cover;
+  width: 120px; height: 120px; border-radius: 50%; object-fit: cover;
   background: #0a1530; border: 3px solid rgba(255,255,255,0.85);
   box-shadow: 0 10px 28px rgba(10,21,48,0.5);
   margin-bottom: 18px;
