@@ -1,6 +1,6 @@
 // ---------- Constants ----------
 // PASTE YOUR APPS SCRIPT WEB APP URL HERE (from Deploy > New deployment)
-const BACKEND_URL = "https://script.google.com/macros/s/AKfycbxFPXYLH1JvXldFaI18XwDJ_Nwfi02b2rS9JhJL_ZxFrwZC8Cc24SVvRIejGCX89VJ15A/exec";
+const BACKEND_URL = "https://script.google.com/macros/s/AKfycbwg8Ewe8O2fyb_HN87zvKafdLiPRdMNCrwd2b6-2Q_3rQ1xYRKZCA4qWUDkHZIO4zlcTw/exec";
 
 // Put your welcome sound file (e.g. "audio/welcome.mp3") in your project folder,
 // then update this path if needed. If the file is missing, playback just silently
@@ -15,7 +15,7 @@ const LOGO_URL = "images/logo.png";
 const CATEGORY_LABEL = { lessonPlan: "Lesson Plan", otherDocuments: "Other Document" };
 
 const CLASS_OPTIONS = ["Class PP", "Class I", "Class II", "Class III", "Class IV", "Class V", "Class VI"];
-const SUBJECT_OPTIONS = ["English", "Dzongkha", "Mathematics", "Science", "ICT", "DTI", "Science & Technology", "Arts", "HPE"];
+const SUBJECT_OPTIONS = ["English", "Dzongkha", "Mathematics", "Science", "ICT", "DTI", "Arts", "HPE"];
 
 // Builds <option> tags for a fixed list, plus the currently-saved value if it's
 // something outside the list (e.g. was typed in before this became a dropdown) —
@@ -72,6 +72,9 @@ function emptyData() {
     timetableUrl: null,
     customFolders: [],
     links: [],
+    teacherPins: {},
+    staff: [],
+    totalStudents: "",
   };
 }
 
@@ -523,14 +526,28 @@ function getUnseenTodRemarks(teacher, todResponses, todRemarks, todRemarksSeen) 
 
 
 async function apiGet() {
-  const res = await fetch(BACKEND_URL);
-  return res.json();
+  try {
+    const res = await fetch(BACKEND_URL);
+    if (!res.ok) return { error: `Server returned ${res.status} ${res.statusText}` };
+    return await res.json();
+  } catch (err) {
+    // Network failure, or the server returned something that isn't valid JSON
+    // (e.g. an Apps Script authorization/error page instead of real data).
+    return { error: "Could not reach the server: " + err.message };
+  }
 }
 
 async function apiPost(payload) {
-  // Sent as text/plain (no custom headers) to avoid CORS preflight against Apps Script
-  const res = await fetch(BACKEND_URL, { method: "POST", body: JSON.stringify(payload) });
-  return res.json();
+  try {
+    // Sent as text/plain (no custom headers) to avoid CORS preflight against Apps Script
+    const res = await fetch(BACKEND_URL, { method: "POST", body: JSON.stringify(payload) });
+    if (!res.ok) return { success: false, error: `Server returned ${res.status} ${res.statusText}` };
+    return await res.json();
+  } catch (err) {
+    // Same as above — this used to throw silently, which is why some actions could
+    // look like "nothing happens": the failure never reached any error banner or toast.
+    return { success: false, error: "Could not reach the server: " + err.message };
+  }
 }
 
 function backendToState(raw) {
@@ -567,6 +584,7 @@ function backendToState(raw) {
   const leaveSeen = {};
   const todRemarks = {};
   const todRemarksSeen = {};
+  const teacherPins = {};
   Object.keys(settings).forEach((k) => {
     if (k.startsWith("override_") && settings[k]) {
       const rest = k.slice("override_".length);
@@ -582,8 +600,12 @@ function backendToState(raw) {
       todRemarksSeen[k.slice("tod_remark_seen_".length)] = settings[k];
     } else if (k.startsWith("tod_remark_")) {
       todRemarks[k.slice("tod_remark_".length)] = settings[k];
+    } else if (k.startsWith("teacher_pin_")) {
+      teacherPins[k.slice("teacher_pin_".length)] = settings[k];
     }
   });
+
+  const staff = (raw.staff || []).map((s) => ({ id: s.ID, name: s.Name, role: s.Role, photo: s.PhotoURL || null }));
 
   return {
     teachers, documents, schedules, overrides,
@@ -595,6 +617,8 @@ function backendToState(raw) {
     todRemarks, todRemarksSeen,
     timetableUrl: settings.timetableUrl || null,
     customFolders, links,
+    teacherPins, staff,
+    totalStudents: settings.totalStudents || "",
   };
 }
 
@@ -655,27 +679,26 @@ async function loadData() {
     state.loaded = true;
     render();
   }
-  try {
-    const raw = await apiGet();
+  const raw = await apiGet();
+  if (raw && raw.error) {
+    if (!cached) state.saveError = "Could not connect to the backend: " + raw.error;
+  } else {
     state.data = backendToState(raw);
     state.saveError = "";
     writeLocalCache(raw);
-  } catch (e) {
-    if (!cached) state.saveError = "Could not connect to the backend. Check BACKEND_URL in script.js.";
-  } finally {
-    state.loaded = true;
-    render();
   }
+  state.loaded = true;
+  render();
 }
 
 async function refreshData() {
-  try {
-    const raw = await apiGet();
+  const raw = await apiGet();
+  if (raw && raw.error) {
+    state.saveError = "Could not refresh: " + raw.error;
+  } else {
     state.data = backendToState(raw);
     state.saveError = "";
     writeLocalCache(raw);
-  } catch (e) {
-    state.saveError = "Could not save. Please check your connection and try again.";
   }
   render();
 }
@@ -905,6 +928,101 @@ async function markTodRemarkSeen(id) {
   const key = `tod_remark_seen_${id}`;
   const res = await apiPost({ action: "setSetting", key, value: "true" });
   if (res && res.success) state.data.todRemarksSeen[id] = "true";
+}
+
+async function setTeacherPin(teacherId, pin) {
+  const key = `teacher_pin_${teacherId}`;
+  const res = await apiPost({ action: "setSetting", key, value: pin });
+  if (res && res.success) {
+    state.data.teacherPins[teacherId] = pin;
+  } else {
+    state.saveError = "Could not set PIN. Please try again.";
+  }
+  return res && res.success;
+}
+
+async function resetTeacherPin(teacherId, teacherName) {
+  if (!confirm(`Reset ${teacherName}'s PIN? They'll be asked to set a new one next time they log in.`)) return;
+  const key = `teacher_pin_${teacherId}`;
+  const prev = state.data.teacherPins[teacherId];
+  delete state.data.teacherPins[teacherId];
+  render();
+  const res = await apiPost({ action: "setSetting", key, value: "" });
+  if (!(res && res.success)) {
+    state.data.teacherPins[teacherId] = prev;
+    state.saveError = "Could not reset PIN. Please try again.";
+    render();
+  }
+  showToast(res && res.success ? "PIN reset" : "Failed to reset PIN");
+}
+
+async function saveTotalStudents(value) {
+  const prev = state.data.totalStudents;
+  state.data.totalStudents = value;
+  state.saveError = "";
+  render();
+  const res = await apiPost({ action: "setSetting", key: "totalStudents", value: String(value) });
+  if (!(res && res.success)) {
+    state.data.totalStudents = prev;
+    state.saveError = "Could not save student count. Please try again.";
+    render();
+  }
+  showToast(res && res.success ? "Updated" : "Failed to save");
+}
+
+async function addStaffMember(name, role, photo) {
+  const res = await apiPost({
+    action: "addStaff", name, role,
+    photoBase64: photo && photo.startsWith("data:") ? photo : undefined,
+    photoMime: photo && photo.startsWith("data:") ? photo.substring(5, photo.indexOf(";")) : undefined,
+  });
+  if (res && res.success) {
+    state.data.staff.push({ id: res.id, name, role, photo: res.photoUrl || null });
+    state.saveError = "";
+  } else {
+    state.saveError = "Could not add staff member: " + (res && res.error ? res.error : "please try again.");
+  }
+  render();
+  showToast(res && res.success ? "Staff member added" : "Failed to add");
+}
+
+async function updateStaffMember(id, name, role, photo) {
+  const target = state.data.staff.find((s) => s.id === id);
+  const prevSnapshot = target ? { ...target } : null;
+  const pickedNewPhoto = photo && photo.startsWith("data:");
+  if (target) {
+    target.name = name;
+    target.role = role;
+    if (pickedNewPhoto) target.photo = photo;
+  }
+  render();
+  const res = await apiPost({
+    action: "updateStaff", staffId: id, name, role,
+    photoBase64: pickedNewPhoto ? photo : undefined,
+    photoMime: pickedNewPhoto ? photo.substring(5, photo.indexOf(";")) : undefined,
+  });
+  if (res && res.success) {
+    if (target && res.photoUrl) target.photo = res.photoUrl;
+    state.saveError = "";
+  } else {
+    if (target && prevSnapshot) Object.assign(target, prevSnapshot);
+    state.saveError = "Could not update staff member: " + (res && res.error ? res.error : "please try again.");
+  }
+  render();
+  showToast(res && res.success ? "Staff member updated" : "Failed to update");
+}
+
+async function removeStaffMember(id) {
+  const prev = state.data.staff;
+  state.data.staff = state.data.staff.filter((s) => s.id !== id);
+  render();
+  const res = await apiPost({ action: "removeStaff", staffId: id });
+  if (!(res && res.success)) {
+    state.data.staff = prev;
+    state.saveError = "Could not remove staff member. Please try again.";
+    render();
+  }
+  showToast(res && res.success ? "Staff member removed" : "Failed to remove");
 }
 
 async function saveTimetableUrl(url) {
@@ -1216,6 +1334,7 @@ function renderTimetableSection() {
 }
 
 function renderHome() {
+  const isPrincipal = state.adminMode && !state.session;
   return `
     <div class="hero-panel">
       <img class="hero-logo" src="${esc(LOGO_URL)}" alt="Kyidsa Primary School logo" onerror="this.style.display='none'" />
@@ -1225,6 +1344,9 @@ function renderHome() {
     </div>
 
     ${renderOutOfStationBanner()}
+
+    ${renderSchoolStatsSection(isPrincipal)}
+    ${renderStaffProfileSection(isPrincipal)}
 
     <div class="home-actions">
       <button class="action-card" data-action="open-teacher-login">
@@ -1255,6 +1377,63 @@ function renderHome() {
           <span style="color:#9aa2b1;">↗</span>
         </a>
       `).join("")}
+    </div>
+  `;
+}
+
+// Public-safe: totals only. Teaching Staff count comes straight from the Teacher
+// Directory (always accurate, nothing to keep in sync manually); Non-Teaching
+// Staff count comes from the roster below. Only Total Students needs manual entry.
+function renderSchoolStatsSection(isPrincipal) {
+  return `
+    <div class="doc-section">
+      <div class="doc-section-head">
+        <span style="font-weight:700; font-size:15px;">🏫 School at a Glance</span>
+        ${isPrincipal ? `<button class="btn btn-tab btn-sm" style="margin-left:auto;" data-action="open-edit-school-data">✏️ Edit</button>` : ""}
+      </div>
+      <div class="school-stats-grid">
+        <div class="stat-box"><div class="stat-value">${esc(state.data.totalStudents || "—")}</div><div class="stat-label">Students</div></div>
+        <div class="stat-box"><div class="stat-value">${state.data.teachers.length}</div><div class="stat-label">Teaching Staff</div></div>
+        <div class="stat-box"><div class="stat-value">${state.data.staff.length}</div><div class="stat-label">Non-Teaching Staff</div></div>
+      </div>
+    </div>
+  `;
+}
+
+// Public-safe cards only (name/role/photo) — deliberately no phone numbers, no
+// links into anyone's private folder, since this is visible to every visitor.
+function renderStaffProfileSection(isPrincipal) {
+  const teachingCards = state.data.teachers.map((t) => `
+    <div class="staff-card">
+      <div class="ring"><div class="avatar" style="width:56px; height:56px;">${t.photo ? `<img src="${driveThumb(t.photo, 140)}" alt="${esc(t.name)}" loading="lazy" />` : `<span class="avatar-letter">${esc((t.name || "?")[0])}</span>`}</div></div>
+      <div class="staff-card-name">${esc(t.name)}</div>
+      <div class="staff-card-role">${esc(t.subject || "Teaching Staff")}</div>
+    </div>
+  `).join("");
+
+  const nonTeachingCards = state.data.staff.map((s) => `
+    <div class="staff-card">
+      <div class="ring"><div class="avatar" style="width:56px; height:56px;">${s.photo ? `<img src="${driveThumb(s.photo, 140)}" alt="${esc(s.name)}" loading="lazy" />` : `<span class="avatar-letter">${esc((s.name || "?")[0])}</span>`}</div></div>
+      <div class="staff-card-name">${esc(s.name)}</div>
+      <div class="staff-card-role">${esc(s.role || "Staff")}</div>
+      ${isPrincipal ? `
+        <div style="display:flex; gap:4px; margin-top:6px;">
+          <button class="btn btn-tab btn-sm" data-action="open-edit-staff" data-id="${s.id}">✏️ Edit</button>
+          <button class="btn btn-danger btn-sm" data-action="remove-staff" data-id="${s.id}">🗑</button>
+        </div>
+      ` : ""}
+    </div>
+  `).join("");
+
+  return `
+    <div class="doc-section">
+      <div class="doc-section-head">
+        <span style="font-weight:700; font-size:15px;">👥 Staff Profile</span>
+        ${isPrincipal ? `<button class="btn btn-tab btn-sm" style="margin-left:auto;" data-action="open-add-staff">➕ Add Staff</button>` : ""}
+      </div>
+      ${(state.data.teachers.length === 0 && state.data.staff.length === 0)
+        ? `<div class="doc-empty">No staff added yet.</div>`
+        : `<div class="staff-grid">${teachingCards}${nonTeachingCards}</div>`}
     </div>
   `;
 }
@@ -1610,10 +1789,32 @@ function otherDocumentsCalendarEditorHtml(schedule) {
 }
 
 function renderFolder(teacher) {
-  const documents = state.data.documents.filter((d) => d.teacherId === teacher.id);
   const isPrincipal = state.adminMode && !state.session;
   const canUpload = !!state.session && state.session.teacherId === teacher.id;
   const showBack = !state.session;
+
+  // Anyone who isn't logged in as this teacher, and isn't the Principal, gets a
+  // locked view — name/photo/subject only (same as the public Directory card),
+  // no documents, remarks, leave history, or Drive access.
+  if (!isPrincipal && !canUpload) {
+    return `
+      ${showBack ? `<button class="btn btn-plain" data-action="back-to-directory">⬅ Back to directory</button>` : ""}
+      <div class="folder-header">
+        <div class="ring"><div class="avatar" style="width:64px;height:64px;">${teacher.photo ? `<img src="${driveThumb(teacher.photo, 160)}" alt="${esc(teacher.name)}" loading="lazy" />` : `<span class="avatar-letter">${esc((teacher.name || "?")[0])}</span>`}</div></div>
+        <div style="flex:1; min-width:160px;">
+          <div class="folder-name">${esc(teacher.name)}</div>
+          <div class="folder-subject">${esc(teacher.subject || "")}</div>
+        </div>
+      </div>
+      <div class="empty-state" style="margin-top:16px;">
+        <div class="empty-title">🔒 This folder is private</div>
+        <div class="empty-sub">Log in as ${esc(teacher.name)}, or as Admin, to view these documents.</div>
+        <button class="btn btn-dark" data-action="open-teacher-login">🔓 I'm a Teacher</button>
+      </div>
+    `;
+  }
+
+  const documents = state.data.documents.filter((d) => d.teacherId === teacher.id);
 
   const byNewest = (a, b) => (new Date(a.uploadedAt) < new Date(b.uploadedAt) ? 1 : -1);
   const lessonPlans = documents.filter((d) => d.category === "lessonPlan").sort(byNewest);
@@ -1633,6 +1834,7 @@ function renderFolder(teacher) {
       </div>
       ${teacher.phone ? `<a href="tel:${esc(teacher.phone)}" class="btn btn-accent">📞 Call ${esc(teacher.phone)}</a>` : ""}
       ${(isPrincipal || canUpload) ? `<button class="btn btn-tab btn-sm" data-action="open-edit-teacher" data-id="${teacher.id}">✏️ Edit Details</button>` : ""}
+      ${isPrincipal ? `<button class="btn btn-tab btn-sm" data-action="reset-teacher-pin" data-id="${teacher.id}">🔑 Reset PIN</button>` : ""}
       ${isPrincipal ? `<button class="btn btn-danger" data-action="remove-teacher" data-id="${teacher.id}">🗑 Remove</button>` : ""}
     </div>
 
@@ -1916,6 +2118,9 @@ function renderModal() {
   if (!m) return "";
   if (m.type === "addTeacher") return renderAddTeacherModal();
   if (m.type === "teacherLogin") return renderTeacherLoginModal();
+  if (m.type === "teacherPin") return renderTeacherPinModal();
+  if (m.type === "editSchoolData") return renderEditSchoolDataModal();
+  if (m.type === "staffForm") return renderStaffModal();
   if (m.type === "adminPin") return renderAdminPinModal();
   if (m.type === "changePin") return renderChangePinModal();
   if (m.type === "notice") return renderNoticeModal(m.overdueItems, m.feedbackDocs, m.leaveNotices, m.todRemarkNotices);
@@ -2053,6 +2258,29 @@ function renderTeacherLoginModal() {
   `;
 }
 
+function renderTeacherPinModal() {
+  const teacherId = state.modal.teacherId;
+  const teacher = state.data.teachers.find((t) => t.id === teacherId);
+  const hasPin = !!state.data.teacherPins[teacherId];
+  return `
+    <div class="modal-overlay" data-action="modal-overlay-close">
+      <div class="modal-box" data-stop-close="1" style="max-width:340px;">
+        <div class="modal-head">
+          <div class="modal-title">${hasPin ? `Enter PIN` : `Set a PIN`}${teacher ? ` — ${esc(teacher.name)}` : ""}</div>
+          <button class="modal-close" data-action="close-modal">✕</button>
+        </div>
+        ${!hasPin ? `<div class="modal-note">First time logging in as ${teacher ? esc(teacher.name) : "yourself"}. Set a PIN now — you'll need it every time you log in as yourself. Don't share it with other teachers.</div>` : ""}
+        <div class="modal-fields">
+          <div><label>${hasPin ? "PIN" : "New PIN"}</label><input type="password" inputmode="numeric" id="teacher-pin-input" placeholder="••••" /></div>
+          ${!hasPin ? `<div><label>Confirm PIN</label><input type="password" inputmode="numeric" id="teacher-pin-confirm-input" placeholder="••••" /></div>` : ""}
+          ${state.modal.error ? `<div class="modal-error">${esc(state.modal.error)}</div>` : ""}
+          <button class="btn btn-dark" style="justify-content:center;" data-action="submit-teacher-pin">${hasPin ? "Unlock" : "Set PIN & Continue"}</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderAdminPinModal() {
   const hasPin = !!state.data.adminPin;
   return `
@@ -2069,6 +2297,50 @@ function renderAdminPinModal() {
           ${state.modal.error ? `<div class="modal-error">${esc(state.modal.error)}</div>` : ""}
           <button class="btn btn-dark" style="justify-content:center;" data-action="submit-admin-pin">${hasPin ? "Unlock" : "Set PIN & Continue"}</button>
         </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderEditSchoolDataModal() {
+  return `
+    <div class="modal-overlay" data-action="modal-overlay-close">
+      <div class="modal-box" data-stop-close="1" style="max-width:340px;">
+        <div class="modal-head">
+          <div class="modal-title">Edit School Data</div>
+          <button class="modal-close" data-action="close-modal">✕</button>
+        </div>
+        <div class="modal-fields">
+          <div><label>Total Students</label><input type="number" min="0" id="edit-total-students" value="${esc(state.data.totalStudents || "")}" placeholder="e.g. 240" /></div>
+        </div>
+        <div class="modal-note" style="margin-top:8px;">Teaching Staff and Non-Teaching Staff counts update automatically from the Teacher Directory and Staff Profile — no need to enter those here.</div>
+        <button class="btn btn-dark" style="width:100%; justify-content:center; margin-top:14px;" data-action="submit-edit-school-data">Save</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderStaffModal() {
+  const photo = state.modal.photo || null;
+  const isEditing = !!state.modal.editingStaffId;
+  return `
+    <div class="modal-overlay" data-action="modal-overlay-close">
+      <div class="modal-box" data-stop-close="1">
+        <div class="modal-head">
+          <div class="modal-title">${isEditing ? "Edit Staff" : "Add Staff"}</div>
+          <button class="modal-close" data-action="close-modal">✕</button>
+        </div>
+        <div class="photo-picker">
+          <label class="photo-circle" for="teacher-photo-input">
+            ${photo ? `<img src="${photo}" alt="" />` : `🖼`}
+          </label>
+          <input id="teacher-photo-input" type="file" accept="image/*" style="display:none;" />
+        </div>
+        <div class="modal-fields">
+          <div><label>Name</label><input id="staff-name" placeholder="e.g. Pema Lhamo" value="${esc(state.modal.name || "")}" /></div>
+          <div><label>Role</label><input id="staff-role" placeholder="e.g. Accountant, Cook, Security Guard" value="${esc(state.modal.role || "")}" /></div>
+        </div>
+        <button class="btn btn-dark" style="width:100%; justify-content:center; margin-top:18px;" data-action="submit-staff">${isEditing ? "Save Changes" : "Add Staff"}</button>
       </div>
     </div>
   `;
@@ -2444,7 +2716,68 @@ document.addEventListener("DOMContentLoaded", () => {
     if (action === "submit-teacher-login") {
       const teacherId = document.getElementById("login-teacher-select").value;
       if (!teacherId) { state.modal.error = "Select your name."; return render(); }
-      return handleTeacherLogin(teacherId);
+      state.modal = { type: "teacherPin", teacherId };
+      return render();
+    }
+
+    if (action === "submit-teacher-pin") {
+      const teacherId = state.modal.teacherId;
+      const teacher = state.data.teachers.find((t) => t.id === teacherId);
+      const hasPin = !!state.data.teacherPins[teacherId];
+      const pin = document.getElementById("teacher-pin-input").value.replace(/\D/g, "").slice(0, 8);
+      if (!hasPin) {
+        const confirmPin = document.getElementById("teacher-pin-confirm-input").value.replace(/\D/g, "").slice(0, 8);
+        if (pin.length < 4) { state.modal.error = "PIN must be at least 4 digits."; return render(); }
+        if (pin !== confirmPin) { state.modal.error = "PINs don't match."; return render(); }
+        const ok = await setTeacherPin(teacherId, pin);
+        if (!ok) return render();
+        return handleTeacherLogin(teacherId);
+      } else {
+        if (pin !== String(state.data.teacherPins[teacherId])) { state.modal.error = "Incorrect PIN."; return render(); }
+        return handleTeacherLogin(teacherId);
+      }
+    }
+
+    if (action === "reset-teacher-pin") {
+      const teacher = state.data.teachers.find((t) => t.id === el.dataset.id);
+      if (!teacher) return;
+      await resetTeacherPin(teacher.id, teacher.name);
+      return;
+    }
+
+    if (action === "open-edit-school-data") { state.modal = { type: "editSchoolData" }; return render(); }
+    if (action === "submit-edit-school-data") {
+      const value = document.getElementById("edit-total-students").value.trim();
+      state.modal = null;
+      await saveTotalStudents(value);
+      return;
+    }
+
+    if (action === "open-add-staff") { state.modal = { type: "staffForm" }; return render(); }
+    if (action === "open-edit-staff") {
+      const s = state.data.staff.find((x) => x.id === el.dataset.id);
+      if (!s) return;
+      state.modal = { type: "staffForm", editingStaffId: s.id, name: s.name, role: s.role, photo: s.photo };
+      return render();
+    }
+    if (action === "remove-staff") {
+      if (!confirm("Remove this staff member from the front page?")) return;
+      await removeStaffMember(el.dataset.id);
+      return;
+    }
+    if (action === "submit-staff") {
+      const name = document.getElementById("staff-name").value.trim();
+      if (!name) return;
+      const role = document.getElementById("staff-role").value.trim();
+      const photo = state.modal.photo || null;
+      const editingStaffId = state.modal.editingStaffId;
+      state.modal = null;
+      if (editingStaffId) {
+        await updateStaffMember(editingStaffId, name, role, photo);
+      } else {
+        await addStaffMember(name, role, photo);
+      }
+      return;
     }
 
     if (action === "submit-admin-pin") {
