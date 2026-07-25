@@ -54,7 +54,7 @@ const LEAVE_FORM_URL = "https://forms.gle/4PyP1VapqVohfvvG8";
 // since most external sites block being shown in an iframe.
 const TIMETABLE_GENERATOR_URL = "https://thinleywangchuk478.github.io/TIME-TABLE-GENERATOR/";
 const EMIS_URL = "https://portal.education.gov.bt/";
-const FACEBOOK_PAGE_URL = "PASTE_YOUR_FACEBOOK_PAGE_URL_HERE"; // e.g. "https://www.facebook.com/YourSchoolPageName"
+const FACEBOOK_PAGE_URL = "https://www.facebook.com/share/14kyqDPF8ce/?mibextid=wwXIfr"; // e.g. "https://www.facebook.com/YourSchoolPageName"
 const SCHOOL_LOCATION_QUERY = "Kyidsa Primary School, Norbugang Gewog, Samtse Dzongkhag, Bhutan"; // used for the footer map — replace with exact coordinates (e.g. "27.xxxx,88.xxxx") if the name search isn't accurate enough
 
 function emptyData() {
