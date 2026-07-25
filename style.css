@@ -165,19 +165,46 @@ main { max-width: 980px; margin: 0 auto; padding: 24px 20px 60px; animation: vie
 .school-stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .stat-box {
   background: rgba(255,255,255,0.6); border: 1px solid rgba(20,33,61,0.08); border-radius: 12px;
-  padding: 14px 10px; text-align: center;
+  padding: 14px 10px; text-align: center; width: 100%; font-family: inherit;
 }
+button.stat-box { transition: transform 0.1s ease, box-shadow 0.15s ease; }
+button.stat-box:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(20,33,61,0.1); }
+button.stat-box:active { transform: scale(0.98); }
 .stat-value { font-family: 'Fraunces', serif; font-size: 26px; font-weight: 700; color: #14213d; line-height: 1.1; }
 .stat-label { font-size: 11.5px; color: #6b7488; text-transform: uppercase; letter-spacing: 0.03em; margin-top: 4px; }
 @media (max-width: 480px) { .school-stats-grid { grid-template-columns: 1fr; } }
+
+.staff-profile-nav-card {
+  display: flex; align-items: center; gap: 14px; width: 100%;
+  background: linear-gradient(135deg, #1c2d52 0%, #14213d 100%); color: #ffffff;
+  border: none; border-radius: 14px; padding: 16px 18px; cursor: pointer; margin-bottom: 18px;
+  font-family: inherit; text-align: left; transition: transform 0.1s ease, box-shadow 0.15s ease;
+  box-shadow: 0 4px 14px rgba(20,33,61,0.25);
+}
+.staff-profile-nav-card:hover { transform: translateY(-1px); box-shadow: 0 8px 20px rgba(20,33,61,0.3); }
+.staff-profile-nav-card:active { transform: scale(0.99); }
+.staff-profile-nav-card .icon { font-size: 28px; }
+.staff-profile-nav-card .label { font-weight: 700; font-size: 16px; }
+.staff-profile-nav-card .sub { font-size: 12px; color: #c9d2e8; margin-top: 2px; }
 
 .staff-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 14px; }
 .staff-card {
   background: rgba(255,255,255,0.6); border: 1px solid rgba(20,33,61,0.08); border-radius: 12px;
   padding: 14px 10px; text-align: center; display: flex; flex-direction: column; align-items: center;
+  width: 100%; font-family: inherit;
 }
+button.staff-card { transition: transform 0.1s ease, box-shadow 0.15s ease; }
+button.staff-card:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(20,33,61,0.1); }
+button.staff-card:active { transform: scale(0.98); }
 .staff-card-name { font-weight: 700; font-size: 13px; margin-top: 8px; }
 .staff-card-role { font-size: 11.5px; color: #6b7488; margin-top: 2px; }
+
+.profile-detail-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; }
+.profile-detail-grid label {
+  font-size: 11px; color: #6b7488; text-transform: uppercase; letter-spacing: 0.03em;
+  display: block; margin-bottom: 3px;
+}
+.profile-detail-grid > div > div:last-child { font-size: 14px; color: #1e2733; font-weight: 600; }
 
 .card {
   background: rgba(255,255,255,0.55);
