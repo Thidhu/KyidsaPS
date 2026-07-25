@@ -1,6 +1,6 @@
 // ---------- Constants ----------
 // PASTE YOUR APPS SCRIPT WEB APP URL HERE (from Deploy > New deployment)
-const BACKEND_URL = "https://script.google.com/macros/s/AKfycbxdUMHsGgmZz6Gl_VqA1Es9o7ZlDxfV6HXLF3k2d9colVR8WSoOVg8jeDALn95FLNXhug/exec";
+const BACKEND_URL = "https://script.google.com/macros/s/AKfycbxgrHC9TYr6ghcCWDci3vZ9Al-dNhEvDMy-bnT9tVddEK4yVjBx-UdiG1UqgjnIOrCFDQ/exec";
 
 // Put your welcome sound file (e.g. "audio/welcome.mp3") in your project folder,
 // then update this path if needed. If the file is missing, playback just silently
@@ -54,7 +54,8 @@ const LEAVE_FORM_URL = "https://forms.gle/4PyP1VapqVohfvvG8";
 // since most external sites block being shown in an iframe.
 const TIMETABLE_GENERATOR_URL = "https://thinleywangchuk478.github.io/TIME-TABLE-GENERATOR/";
 const EMIS_URL = "https://portal.education.gov.bt/";
-const FACEBOOK_PAGE_URL = "https://www.facebook.com/share/14kyqDPF8ce/?mibextid=wwXIfr"; // e.g. "https://www.facebook.com/YourSchoolPageName"
+const FACEBOOK_PAGE_URL = "PASTE_YOUR_FACEBOOK_PAGE_URL_HERE"; // e.g. "https://www.facebook.com/YourSchoolPageName"
+const SCHOOL_LOCATION_QUERY = "Kyidsa Primary School, Norbugang Gewog, Samtse Dzongkhag, Bhutan"; // used for the footer map — replace with exact coordinates (e.g. "27.xxxx,88.xxxx") if the name search isn't accurate enough
 
 function emptyData() {
   return {
@@ -311,6 +312,70 @@ function rowsToCsv(rows) {
   };
   return [cols.map(cell).join(",")].concat(rows.map((r) => cols.map((c) => cell(r[c])).join(","))).join("\n");
 }
+
+// ---------- Staff list export/print (Teaching + Non-Teaching combined) ----------
+function staffExportRows() {
+  const teacherRows = state.data.teachers.map((t) => ({
+    Name: t.name, Role: t.subject || "Teaching Staff", Gender: t.gender || "",
+    Qualification: t.qualification || "", Major: t.major || "", "Employee ID": t.employeeId || "",
+    "Date Joined": t.dateJoined || "", Phone: t.phone || "", Email: t.email || "",
+  }));
+  const staffRows = state.data.staff.map((s) => ({
+    Name: s.name, Role: s.role || "Staff", Gender: s.gender || "",
+    Qualification: s.qualification || "", Major: s.major || "", "Employee ID": s.employeeId || "",
+    "Date Joined": s.dateJoined || "", Phone: s.phone || "", Email: s.email || "",
+  }));
+  return [...teacherRows, ...staffRows];
+}
+
+function exportStaffCsv() {
+  const rows = staffExportRows();
+  if (rows.length === 0) { alert("No staff to export yet."); return; }
+  const csv = rowsToCsv(rows);
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `Staff_List_${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function printStaffList() {
+  const rows = staffExportRows();
+  if (rows.length === 0) { alert("No staff to print yet."); return; }
+  const cols = Object.keys(rows[0]);
+  const win = window.open("", "_blank");
+  if (!win) { alert("Please allow pop-ups for this site to print."); return; }
+  const rowsHtml = rows.map((r) => `<tr>${cols.map((c) => `<td>${esc(r[c] ?? "")}</td>`).join("")}</tr>`).join("");
+  win.document.write(`
+    <html>
+      <head>
+        <title>Staff List</title>
+        <style>
+          body { font-family: Arial, Helvetica, sans-serif; padding: 24px; color: #1e2733; }
+          h1 { font-size: 18px; margin: 0 0 2px; }
+          .meta { font-size: 12px; color: #666; margin-bottom: 18px; }
+          table { border-collapse: collapse; width: 100%; }
+          th, td { border: 1px solid #ccc; padding: 6px 8px; font-size: 11.5px; text-align: left; vertical-align: top; }
+          th { background: #f0f1f4; }
+          @media print { body { padding: 0; } }
+        </style>
+      </head>
+      <body>
+        <h1>Staff List — Kyidsa Primary School</h1>
+        <div class="meta">Printed ${esc(new Date().toLocaleString())} · ${rows.length} staff member${rows.length === 1 ? "" : "s"}</div>
+        <table><thead><tr>${cols.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${rowsHtml}</tbody></table>
+      </body>
+    </html>
+  `);
+  win.document.close();
+  win.focus();
+  win.print();
+}
+
 
 function exportTableCsv(source, fromStr, toStr) {
   const { rows: allRows, title } = exportSourceRows(source);
@@ -1280,6 +1345,7 @@ function render() {
       ${state.view === "staffDirectory" ? renderStaffDirectory() : ""}
       ${state.view === "staffProfile" ? renderStaffProfilePage() : ""}
     </main>
+    ${renderFooter()}
     ${state.modal ? renderModal() : ""}
     ${state.toast ? `<div class="toast">${esc(state.toast)}</div>` : ""}
   `;
@@ -1375,6 +1441,22 @@ function renderTimetableSection() {
   `;
 }
 
+function renderFooter() {
+  const mapSrc = "https://www.google.com/maps?q=" + encodeURIComponent(SCHOOL_LOCATION_QUERY) + "&output=embed";
+  const mapsLink = "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(SCHOOL_LOCATION_QUERY);
+  return `
+    <footer class="site-footer">
+      <div class="footer-map">
+        <iframe src="${esc(mapSrc)}" width="100%" height="180" style="border:0;" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+      </div>
+      <div class="footer-text">
+        <div>© 2026 Kyidsa Primary School, Norbugang Gewog, Samtse Dzongkhag</div>
+        <a href="${esc(mapsLink)}" target="_blank" rel="noopener">📍 Get Directions</a>
+      </div>
+    </footer>
+  `;
+}
+
 function renderFacebookSection() {
   const notConfigured = !FACEBOOK_PAGE_URL || FACEBOOK_PAGE_URL.startsWith("PASTE_");
   if (notConfigured) {
@@ -1404,6 +1486,11 @@ function renderFacebookSection() {
 
 function renderHome() {
   const isPrincipal = state.adminMode && !state.session;
+  const importantLinks = [
+    ...PORTFOLIO_LINKS,
+    { label: "Timetable Generator", url: TIMETABLE_GENERATOR_URL, icon: "🗓️" },
+    { label: "EMIS", url: EMIS_URL, icon: "🏫" },
+  ];
   return `
     <div class="hero-panel">
       <img class="hero-logo" src="${esc(LOGO_URL)}" alt="Kyidsa Primary School logo" onerror="this.style.display='none'" />
@@ -1414,26 +1501,8 @@ function renderHome() {
 
     ${renderOutOfStationBanner()}
 
-    ${renderStaffProfileNavCard()}
     ${renderSchoolStatsSection(isPrincipal)}
-
-    <div class="home-actions">
-      <button class="action-card" data-action="open-teacher-login">
-        <span class="action-icon">🔓</span>
-        <span class="action-label">I'm a Teacher</span>
-        <span class="action-sub">Log in for Attendance, TOD Report &amp; Leave</span>
-      </button>
-      <button class="action-card" data-action="open-external" data-url="${esc(TIMETABLE_GENERATOR_URL)}" data-title="Timetable Generator">
-        <span class="action-icon">🗓️</span>
-        <span class="action-label">Timetable Generator</span>
-        <span class="action-sub">Opens here in the app</span>
-      </button>
-      <button class="action-card" data-action="open-external" data-url="${esc(EMIS_URL)}" data-title="EMIS">
-        <span class="action-icon">🏫</span>
-        <span class="action-label">EMIS</span>
-        <span class="action-sub">Opens here in the app</span>
-      </button>
-    </div>
+    ${renderStaffProfileNavCard()}
 
     ${renderTimetableSection()}
 
@@ -1441,7 +1510,7 @@ function renderHome() {
 
     <div class="doc-section" style="margin-top:22px;">
       <div class="doc-section-head"><span>Important Links</span></div>
-      ${PORTFOLIO_LINKS.map((link) => `
+      ${importantLinks.map((link) => `
         <a class="doc-row link-row" href="${esc(link.url)}" target="_blank" rel="noopener">
           <span style="font-size:16px;">${link.icon}</span>
           <span style="flex:1;">${esc(link.label)}</span>
@@ -1533,7 +1602,13 @@ function renderStaffDirectory() {
     <button class="btn btn-plain" data-action="set-view" data-view="home">⬅ Back to Home</button>
     <div class="section-head">
       <h2 class="serif" style="font-size:20px; margin:0; color:#4A3B22;">Staff Profile</h2>
-      ${isPrincipal ? `<button class="btn btn-dark" data-action="open-add-staff">➕ Add Staff</button>` : ""}
+      ${isPrincipal ? `
+        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+          <button class="btn btn-tab btn-sm" data-action="export-staff-csv">⬇️ CSV</button>
+          <button class="btn btn-tab btn-sm" data-action="print-staff-list">🖨️ Print</button>
+          <button class="btn btn-dark" data-action="open-add-staff">➕ Add Staff</button>
+        </div>
+      ` : ""}
     </div>
     ${(state.data.teachers.length === 0 && state.data.staff.length === 0)
       ? `<div class="doc-empty" style="text-align:center; padding:30px;">No staff added yet.</div>`
@@ -2985,6 +3060,8 @@ document.addEventListener("DOMContentLoaded", () => {
       return render();
     }
 
+    if (action === "export-staff-csv") { exportStaffCsv(); return; }
+    if (action === "print-staff-list") { printStaffList(); return; }
     if (action === "open-add-staff") { state.modal = { type: "staffForm" }; return render(); }
     if (action === "open-edit-staff") {
       const s = state.data.staff.find((x) => x.id === el.dataset.id);
