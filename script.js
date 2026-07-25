@@ -1,6 +1,6 @@
 // ---------- Constants ----------
 // PASTE YOUR APPS SCRIPT WEB APP URL HERE (from Deploy > New deployment)
-const BACKEND_URL = "https://script.google.com/macros/s/AKfycbw5Wonq1vPux7p1Y09d3vJd4X0pxQYaodF8diNotLdOGYcMzte-yh1jxmQgA-x80dwzoQ/exec";
+const BACKEND_URL = "https://script.google.com/macros/s/AKfycbwg8Ewe8O2fyb_HN87zvKafdLiPRdMNCrwd2b6-2Q_3rQ1xYRKZCA4qWUDkHZIO4zlcTw/exec";
 
 // Put your welcome sound file (e.g. "audio/welcome.mp3") in your project folder,
 // then update this path if needed. If the file is missing, playback just silently
@@ -16,6 +16,7 @@ const CATEGORY_LABEL = { lessonPlan: "Lesson Plan", otherDocuments: "Other Docum
 
 const CLASS_OPTIONS = ["Class PP", "Class I", "Class II", "Class III", "Class IV", "Class V", "Class VI"];
 const SUBJECT_OPTIONS = ["English", "Dzongkha", "Mathematics", "Science", "ICT", "DTI", "Arts", "HPE"];
+const GENDER_OPTIONS = ["Male", "Female"];
 
 // Builds <option> tags for a fixed list, plus the currently-saved value if it's
 // something outside the list (e.g. was typed in before this became a dropdown) —
@@ -53,6 +54,7 @@ const LEAVE_FORM_URL = "https://forms.gle/4PyP1VapqVohfvvG8";
 // since most external sites block being shown in an iframe.
 const TIMETABLE_GENERATOR_URL = "https://thinleywangchuk478.github.io/TIME-TABLE-GENERATOR/";
 const EMIS_URL = "https://portal.education.gov.bt/";
+const FACEBOOK_PAGE_URL = "https://www.facebook.com/share/14kyqDPF8ce/?mibextid=wwXIfr"; // e.g. "https://www.facebook.com/YourSchoolPageName"
 
 function emptyData() {
   return {
@@ -74,7 +76,7 @@ function emptyData() {
     links: [],
     teacherPins: {},
     staff: [],
-    totalStudents: "",
+    studentBreakdown: {}, // { "Class III": { boys: 12, girls: 10 }, ... }
   };
 }
 
@@ -94,6 +96,7 @@ const state = {
   pendingUpload: null, // { category, docName, fileName, mimeType, dataUrl } — staged, not yet submitted
   audioMuted: false,
   directorySearch: "",
+  staffProfileTarget: null, // { kind: "teacher"|"staff", id }
 };
 
 // ---------- Decorative page-wide twinkling stars (injected once, lives outside #app so re-renders don't touch it) ----------
@@ -555,6 +558,8 @@ function backendToState(raw) {
   const teachers = (raw.teachers || []).map((t) => ({
     id: t.ID, name: t.Name, subject: t.Subject, phone: t.Phone, photo: t.PhotoURL || null,
     folderUrl: teacherFolderUrls[t.ID] || null,
+    gender: t.Gender || "", qualification: t.Qualification || "", major: t.Major || "",
+    employeeId: t.EmployeeID || "", dateJoined: t.DateJoined || "", email: t.Email || "",
   }));
 
   const customFolders = (raw.customFolders || []).map((f) => ({
@@ -605,7 +610,18 @@ function backendToState(raw) {
     }
   });
 
-  const staff = (raw.staff || []).map((s) => ({ id: s.ID, name: s.Name, role: s.Role, photo: s.PhotoURL || null }));
+  const staff = (raw.staff || []).map((s) => ({
+    id: s.ID, name: s.Name, role: s.Role, photo: s.PhotoURL || null,
+    gender: s.Gender || "", qualification: s.Qualification || "", major: s.Major || "",
+    employeeId: s.EmployeeID || "", dateJoined: s.DateJoined || "", phone: s.Phone || "", email: s.Email || "",
+  }));
+
+  let studentBreakdown = {};
+  try {
+    studentBreakdown = settings.studentBreakdown ? JSON.parse(settings.studentBreakdown) : {};
+  } catch (e) {
+    studentBreakdown = {};
+  }
 
   return {
     teachers, documents, schedules, overrides,
@@ -618,7 +634,7 @@ function backendToState(raw) {
     timetableUrl: settings.timetableUrl || null,
     customFolders, links,
     teacherPins, staff,
-    totalStudents: settings.totalStudents || "",
+    studentBreakdown,
   };
 }
 
@@ -650,6 +666,7 @@ function saveNavState() {
       adminMode: state.adminMode,
       activeTeacherId: state.activeTeacherId,
       session: state.session,
+      staffProfileTarget: state.staffProfileTarget,
     }));
   } catch (e) {
     // ignore — worst case, next refresh just lands on Home like before
@@ -664,6 +681,7 @@ function restoreNavState() {
     if (nav.adminMode) state.adminMode = true;
     if (nav.activeTeacherId) state.activeTeacherId = nav.activeTeacherId;
     if (nav.session) state.session = nav.session;
+    if (nav.staffProfileTarget) state.staffProfileTarget = nav.staffProfileTarget;
   } catch (e) {
     // ignore — falls back to the default Home view
   }
@@ -678,6 +696,7 @@ async function loadData() {
     state.data = backendToState(cached);
     state.loaded = true;
     render();
+    if (state.view === "home") animateStatCounters();
   }
   const raw = await apiGet();
   if (raw && raw.error) {
@@ -689,6 +708,7 @@ async function loadData() {
   }
   state.loaded = true;
   render();
+  if (state.view === "home") animateStatCounters();
 }
 
 async function refreshData() {
@@ -722,12 +742,16 @@ async function addTeacher(teacher) {
     name: teacher.name,
     subject: teacher.subject,
     phone: teacher.phone,
+    gender: teacher.gender, qualification: teacher.qualification, major: teacher.major,
+    employeeId: teacher.employeeId, dateJoined: teacher.dateJoined, email: teacher.email,
     photoBase64: teacher.photo || undefined,
     photoMime: teacher.photo ? teacher.photo.substring(5, teacher.photo.indexOf(";")) : undefined,
   });
   if (res && res.success) {
     state.data.teachers.push({
       id: res.id, name: teacher.name, subject: teacher.subject, phone: teacher.phone,
+      gender: teacher.gender, qualification: teacher.qualification, major: teacher.major,
+      employeeId: teacher.employeeId, dateJoined: teacher.dateJoined, email: teacher.email,
       photo: res.photoUrl || teacher.photo || null,
     });
     state.saveError = "";
@@ -749,6 +773,12 @@ async function updateTeacher(id, teacher) {
     target.name = teacher.name;
     target.subject = teacher.subject;
     target.phone = teacher.phone;
+    target.gender = teacher.gender;
+    target.qualification = teacher.qualification;
+    target.major = teacher.major;
+    target.employeeId = teacher.employeeId;
+    target.dateJoined = teacher.dateJoined;
+    target.email = teacher.email;
     if (pickedNewPhoto) target.photo = teacher.photo;
   }
   state.saveError = "";
@@ -760,6 +790,8 @@ async function updateTeacher(id, teacher) {
     name: teacher.name,
     subject: teacher.subject,
     phone: teacher.phone,
+    gender: teacher.gender, qualification: teacher.qualification, major: teacher.major,
+    employeeId: teacher.employeeId, dateJoined: teacher.dateJoined, email: teacher.email,
     photoBase64: pickedNewPhoto ? teacher.photo : undefined,
     photoMime: pickedNewPhoto ? teacher.photo.substring(5, teacher.photo.indexOf(";")) : undefined,
   });
@@ -956,28 +988,31 @@ async function resetTeacherPin(teacherId, teacherName) {
   showToast(res && res.success ? "PIN reset" : "Failed to reset PIN");
 }
 
-async function saveTotalStudents(value) {
-  const prev = state.data.totalStudents;
-  state.data.totalStudents = value;
+async function saveStudentBreakdown(breakdown) {
+  const prev = state.data.studentBreakdown;
+  state.data.studentBreakdown = breakdown;
   state.saveError = "";
   render();
-  const res = await apiPost({ action: "setSetting", key: "totalStudents", value: String(value) });
+  const res = await apiPost({ action: "setSetting", key: "studentBreakdown", value: JSON.stringify(breakdown) });
   if (!(res && res.success)) {
-    state.data.totalStudents = prev;
-    state.saveError = "Could not save student count. Please try again.";
+    state.data.studentBreakdown = prev;
+    state.saveError = "Could not save student numbers. Please try again.";
     render();
   }
-  showToast(res && res.success ? "Updated" : "Failed to save");
+  showToast(res && res.success ? "Student numbers updated" : "Failed to save");
 }
 
-async function addStaffMember(name, role, photo) {
+async function addStaffMember(name, role, photo, extra) {
+  extra = extra || {};
   const res = await apiPost({
     action: "addStaff", name, role,
+    gender: extra.gender, qualification: extra.qualification, major: extra.major,
+    employeeId: extra.employeeId, dateJoined: extra.dateJoined, phone: extra.phone, email: extra.email,
     photoBase64: photo && photo.startsWith("data:") ? photo : undefined,
     photoMime: photo && photo.startsWith("data:") ? photo.substring(5, photo.indexOf(";")) : undefined,
   });
   if (res && res.success) {
-    state.data.staff.push({ id: res.id, name, role, photo: res.photoUrl || null });
+    state.data.staff.push({ id: res.id, name, role, photo: res.photoUrl || null, ...extra });
     state.saveError = "";
   } else {
     state.saveError = "Could not add staff member: " + (res && res.error ? res.error : "please try again.");
@@ -986,18 +1021,22 @@ async function addStaffMember(name, role, photo) {
   showToast(res && res.success ? "Staff member added" : "Failed to add");
 }
 
-async function updateStaffMember(id, name, role, photo) {
+async function updateStaffMember(id, name, role, photo, extra) {
+  extra = extra || {};
   const target = state.data.staff.find((s) => s.id === id);
   const prevSnapshot = target ? { ...target } : null;
   const pickedNewPhoto = photo && photo.startsWith("data:");
   if (target) {
     target.name = name;
     target.role = role;
+    Object.assign(target, extra);
     if (pickedNewPhoto) target.photo = photo;
   }
   render();
   const res = await apiPost({
     action: "updateStaff", staffId: id, name, role,
+    gender: extra.gender, qualification: extra.qualification, major: extra.major,
+    employeeId: extra.employeeId, dateJoined: extra.dateJoined, phone: extra.phone, email: extra.email,
     photoBase64: pickedNewPhoto ? photo : undefined,
     photoMime: pickedNewPhoto ? photo.substring(5, photo.indexOf(";")) : undefined,
   });
@@ -1237,6 +1276,9 @@ function render() {
       ${state.view === "directory" ? renderDirectory() : ""}
       ${state.view === "dashboard" && state.adminMode ? renderDashboard() : ""}
       ${state.view === "folder" && activeTeacher ? renderFolder(activeTeacher) : ""}
+      ${state.view === "studentDetails" ? renderStudentDetails() : ""}
+      ${state.view === "staffDirectory" ? renderStaffDirectory() : ""}
+      ${state.view === "staffProfile" ? renderStaffProfilePage() : ""}
     </main>
     ${state.modal ? renderModal() : ""}
     ${state.toast ? `<div class="toast">${esc(state.toast)}</div>` : ""}
@@ -1333,6 +1375,33 @@ function renderTimetableSection() {
   `;
 }
 
+function renderFacebookSection() {
+  const notConfigured = !FACEBOOK_PAGE_URL || FACEBOOK_PAGE_URL.startsWith("PASTE_");
+  if (notConfigured) {
+    const isPrincipal = state.adminMode && !state.session;
+    if (!isPrincipal) return ""; // don't show a broken/placeholder box to the public
+    return `
+      <div class="doc-section" style="margin-top:22px;">
+        <div class="doc-section-head"><span>📘 Facebook Updates</span></div>
+        <div class="doc-empty">Not set up yet — paste your Facebook Page URL into FACEBOOK_PAGE_URL near the top of script.js to show a live preview here.</div>
+      </div>
+    `;
+  }
+  const embedSrc = "https://www.facebook.com/plugins/page.php?href=" + encodeURIComponent(FACEBOOK_PAGE_URL) +
+    "&tabs=timeline&width=500&height=420&small_header=true&adapt_container_width=true&hide_cover=false&show_facepile=false";
+  return `
+    <div class="doc-section" style="margin-top:22px;">
+      <div class="doc-section-head">
+        <span>📘 Facebook Updates</span>
+        <a href="${esc(FACEBOOK_PAGE_URL)}" target="_blank" rel="noopener" style="margin-left:auto; font-size:12.5px; color:#45526b;">View full page ↗</a>
+      </div>
+      <div class="form-embed-wrap" style="max-width:500px;">
+        <iframe src="${esc(embedSrc)}" width="100%" height="420" style="border:none; overflow:hidden;" scrolling="no" frameborder="0" allowfullscreen="true" allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share">Loading…</iframe>
+      </div>
+    </div>
+  `;
+}
+
 function renderHome() {
   const isPrincipal = state.adminMode && !state.session;
   return `
@@ -1345,8 +1414,8 @@ function renderHome() {
 
     ${renderOutOfStationBanner()}
 
+    ${renderStaffProfileNavCard()}
     ${renderSchoolStatsSection(isPrincipal)}
-    ${renderStaffProfileSection(isPrincipal)}
 
     <div class="home-actions">
       <button class="action-card" data-action="open-teacher-login">
@@ -1368,6 +1437,8 @@ function renderHome() {
 
     ${renderTimetableSection()}
 
+    ${renderFacebookSection()}
+
     <div class="doc-section" style="margin-top:22px;">
       <div class="doc-section-head"><span>Important Links</span></div>
       ${PORTFOLIO_LINKS.map((link) => `
@@ -1381,59 +1452,142 @@ function renderHome() {
   `;
 }
 
+function totalStudentsCount() {
+  return Object.values(state.data.studentBreakdown || {}).reduce(
+    (sum, c) => sum + (Number(c.boys) || 0) + (Number(c.girls) || 0), 0
+  );
+}
+
+// A single prominent, clickable entry point — NOT the full grid of staff cards.
+// Tapping it goes to the Staff Directory (renderStaffDirectory), where each card
+// then leads to that person's own full profile page.
+function renderStaffProfileNavCard() {
+  const total = state.data.teachers.length + state.data.staff.length;
+  return `
+    <button class="staff-profile-nav-card" data-action="set-view" data-view="staffDirectory">
+      <span class="icon">👥</span>
+      <div>
+        <div class="label">Staff Profile</div>
+        <div class="sub">${total} staff member${total === 1 ? "" : "s"} — tap to view</div>
+      </div>
+    </button>
+  `;
+}
+
 // Public-safe: totals only. Teaching Staff count comes straight from the Teacher
 // Directory (always accurate, nothing to keep in sync manually); Non-Teaching
-// Staff count comes from the roster below. Only Total Students needs manual entry.
+// Staff count comes from the roster. Students is computed from the class-by-class
+// breakdown — tapping it plays a short loading animation, then opens the details.
 function renderSchoolStatsSection(isPrincipal) {
   return `
     <div class="doc-section">
       <div class="doc-section-head">
         <span style="font-weight:700; font-size:15px;">🏫 School at a Glance</span>
-        ${isPrincipal ? `<button class="btn btn-tab btn-sm" style="margin-left:auto;" data-action="open-edit-school-data">✏️ Edit</button>` : ""}
       </div>
       <div class="school-stats-grid">
-        <div class="stat-box"><div class="stat-value">${esc(state.data.totalStudents || "—")}</div><div class="stat-label">Students</div></div>
-        <div class="stat-box"><div class="stat-value">${state.data.teachers.length}</div><div class="stat-label">Teaching Staff</div></div>
-        <div class="stat-box"><div class="stat-value">${state.data.staff.length}</div><div class="stat-label">Non-Teaching Staff</div></div>
+        <button class="stat-box" data-action="open-student-details" style="cursor:pointer; border:none; font-family:inherit;">
+          <div class="stat-value" data-count-target="${totalStudentsCount()}">0</div>
+          <div class="stat-label">Students ↗</div>
+        </button>
+        <div class="stat-box"><div class="stat-value" data-count-target="${state.data.teachers.length}">0</div><div class="stat-label">Teaching Staff</div></div>
+        <div class="stat-box"><div class="stat-value" data-count-target="${state.data.staff.length}">0</div><div class="stat-label">Non-Teaching Staff</div></div>
       </div>
     </div>
   `;
 }
 
-// Public-safe cards only (name/role/photo) — deliberately no phone numbers, no
-// links into anyone's private folder, since this is visible to every visitor.
-function renderStaffProfileSection(isPrincipal) {
-  const teachingCards = state.data.teachers.map((t) => `
-    <div class="staff-card">
-      <div class="ring"><div class="avatar" style="width:56px; height:56px;">${t.photo ? `<img src="${driveThumb(t.photo, 140)}" alt="${esc(t.name)}" loading="lazy" />` : `<span class="avatar-letter">${esc((t.name || "?")[0])}</span>`}</div></div>
-      <div class="staff-card-name">${esc(t.name)}</div>
-      <div class="staff-card-role">${esc(t.subject || "Teaching Staff")}</div>
+// ---------- Student Details (class x gender breakdown — counts only, no individual student records) ----------
+function renderStudentDetails() {
+  const isPrincipal = state.adminMode && !state.session;
+  const breakdown = state.data.studentBreakdown || {};
+  const rows = CLASS_OPTIONS.map((cls) => {
+    const b = breakdown[cls] || {};
+    return { cls, boys: Number(b.boys) || 0, girls: Number(b.girls) || 0 };
+  });
+  const totalBoys = rows.reduce((s, r) => s + r.boys, 0);
+  const totalGirls = rows.reduce((s, r) => s + r.girls, 0);
+  return `
+    <button class="btn btn-plain" data-action="set-view" data-view="home">⬅ Back to Home</button>
+    <div class="section-head">
+      <h2 class="serif" style="font-size:20px; margin:0; color:#4A3B22;">Student Details</h2>
+      ${isPrincipal ? `<button class="btn btn-dark" data-action="open-edit-students">✏️ Edit Numbers</button>` : ""}
     </div>
-  `).join("");
+    <div class="dash-table-wrap">
+      <table>
+        <thead><tr><th>Class</th><th>Boys</th><th>Girls</th><th>Total</th></tr></thead>
+        <tbody>
+          ${rows.map((r) => `<tr><td>${esc(r.cls)}</td><td>${r.boys}</td><td>${r.girls}</td><td style="font-weight:700;">${r.boys + r.girls}</td></tr>`).join("")}
+          <tr style="font-weight:700; background:rgba(20,33,61,0.04);"><td>Total</td><td>${totalBoys}</td><td>${totalGirls}</td><td>${totalBoys + totalGirls}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  `;
+}
 
-  const nonTeachingCards = state.data.staff.map((s) => `
-    <div class="staff-card">
-      <div class="ring"><div class="avatar" style="width:56px; height:56px;">${s.photo ? `<img src="${driveThumb(s.photo, 140)}" alt="${esc(s.name)}" loading="lazy" />` : `<span class="avatar-letter">${esc((s.name || "?")[0])}</span>`}</div></div>
-      <div class="staff-card-name">${esc(s.name)}</div>
-      <div class="staff-card-role">${esc(s.role || "Staff")}</div>
-      ${isPrincipal ? `
-        <div style="display:flex; gap:4px; margin-top:6px;">
-          <button class="btn btn-tab btn-sm" data-action="open-edit-staff" data-id="${s.id}">✏️ Edit</button>
-          <button class="btn btn-danger btn-sm" data-action="remove-staff" data-id="${s.id}">🗑</button>
-        </div>
-      ` : ""}
+// ---------- Staff Directory (the actual grid of cards, one level in from Home) ----------
+function renderStaffDirectory() {
+  const isPrincipal = state.adminMode && !state.session;
+  const teachingCards = state.data.teachers.map((t) => renderStaffDirCard(t.id, "teacher", t.name, t.subject || "Teaching Staff", t.photo));
+  const nonTeachingCards = state.data.staff.map((s) => renderStaffDirCard(s.id, "staff", s.name, s.role || "Staff", s.photo));
+  return `
+    <button class="btn btn-plain" data-action="set-view" data-view="home">⬅ Back to Home</button>
+    <div class="section-head">
+      <h2 class="serif" style="font-size:20px; margin:0; color:#4A3B22;">Staff Profile</h2>
+      ${isPrincipal ? `<button class="btn btn-dark" data-action="open-add-staff">➕ Add Staff</button>` : ""}
     </div>
-  `).join("");
+    ${(state.data.teachers.length === 0 && state.data.staff.length === 0)
+      ? `<div class="doc-empty" style="text-align:center; padding:30px;">No staff added yet.</div>`
+      : `<div class="staff-grid">${teachingCards}${nonTeachingCards}</div>`}
+  `;
+}
+
+function renderStaffDirCard(id, kind, name, roleLabel, photo) {
+  return `
+    <button class="staff-card" data-action="open-staff-profile" data-kind="${kind}" data-id="${id}" style="border:none; cursor:pointer; font-family:inherit;">
+      <div class="ring"><div class="avatar" style="width:56px; height:56px;">${photo ? `<img src="${driveThumb(photo, 140)}" alt="${esc(name)}" loading="lazy" />` : `<span class="avatar-letter">${esc((name || "?")[0])}</span>`}</div></div>
+      <div class="staff-card-name">${esc(name)}</div>
+      <div class="staff-card-role">${esc(roleLabel)}</div>
+    </button>
+  `;
+}
+
+// ---------- Individual Staff Profile (one level in from the Staff Directory) ----------
+function renderStaffProfilePage() {
+  const target = state.staffProfileTarget;
+  const isPrincipal = state.adminMode && !state.session;
+  const person = target && (target.kind === "teacher"
+    ? state.data.teachers.find((t) => t.id === target.id)
+    : state.data.staff.find((s) => s.id === target.id));
+
+  if (!person) {
+    return `
+      <button class="btn btn-plain" data-action="set-view" data-view="staffDirectory">⬅ Back to Staff Profile</button>
+      <div class="doc-empty" style="text-align:center; padding:30px;">This profile could not be found.</div>
+    `;
+  }
+
+  const roleLabel = target.kind === "teacher" ? (person.subject || "Teaching Staff") : (person.role || "Staff");
 
   return `
-    <div class="doc-section">
-      <div class="doc-section-head">
-        <span style="font-weight:700; font-size:15px;">👥 Staff Profile</span>
-        ${isPrincipal ? `<button class="btn btn-tab btn-sm" style="margin-left:auto;" data-action="open-add-staff">➕ Add Staff</button>` : ""}
+    <button class="btn btn-plain" data-action="set-view" data-view="staffDirectory">⬅ Back to Staff Profile</button>
+    <div class="folder-header">
+      <div class="ring"><div class="avatar" style="width:64px;height:64px;">${person.photo ? `<img src="${driveThumb(person.photo, 160)}" alt="${esc(person.name)}" loading="lazy" />` : `<span class="avatar-letter">${esc((person.name || "?")[0])}</span>`}</div></div>
+      <div style="flex:1; min-width:160px;">
+        <div class="folder-name">${esc(person.name)}</div>
+        <div class="folder-subject">${esc(roleLabel)}</div>
       </div>
-      ${(state.data.teachers.length === 0 && state.data.staff.length === 0)
-        ? `<div class="doc-empty">No staff added yet.</div>`
-        : `<div class="staff-grid">${teachingCards}${nonTeachingCards}</div>`}
+      ${isPrincipal ? `<button class="btn btn-tab btn-sm" data-action="${target.kind === "teacher" ? "open-edit-teacher" : "open-edit-staff"}" data-id="${person.id}">✏️ Edit</button>` : ""}
+    </div>
+    <div class="doc-section">
+      <div class="profile-detail-grid">
+        <div><label>Gender</label><div>${esc(person.gender || "—")}</div></div>
+        <div><label>Qualification</label><div>${esc(person.qualification || "—")}</div></div>
+        <div><label>Major / Specialization</label><div>${esc(person.major || "—")}</div></div>
+        <div><label>Employee ID</label><div>${esc(person.employeeId || "—")}</div></div>
+        <div><label>Date Joined</label><div>${person.dateJoined ? fmtDate(person.dateJoined) : "—"}</div></div>
+        <div><label>Phone</label><div>${esc(person.phone || "—")}</div></div>
+        <div><label>Email</label><div>${esc(person.email || "—")}</div></div>
+      </div>
     </div>
   `;
 }
@@ -2119,7 +2273,7 @@ function renderModal() {
   if (m.type === "addTeacher") return renderAddTeacherModal();
   if (m.type === "teacherLogin") return renderTeacherLoginModal();
   if (m.type === "teacherPin") return renderTeacherPinModal();
-  if (m.type === "editSchoolData") return renderEditSchoolDataModal();
+  if (m.type === "editStudents") return renderEditStudentsModal();
   if (m.type === "staffForm") return renderStaffModal();
   if (m.type === "adminPin") return renderAdminPinModal();
   if (m.type === "changePin") return renderChangePinModal();
@@ -2224,6 +2378,12 @@ function renderAddTeacherModal() {
           <div><label>Name</label><input id="at-name" placeholder="e.g. Sonam Choden" value="${esc(state.modal.name || "")}" /></div>
           <div><label>Subject / Class</label><input id="at-subject" placeholder="e.g. Class III, Dzongkha" value="${esc(state.modal.subject || "")}" /></div>
           <div><label>Phone Number</label><input id="at-phone" placeholder="e.g. 17123456" value="${esc(state.modal.phone || "")}" /></div>
+          <div><label>Gender</label><select id="at-gender">${selectOptionsHtml(GENDER_OPTIONS, state.modal.gender || "")}</select></div>
+          <div><label>Qualification</label><input id="at-qualification" placeholder="e.g. B.Ed" value="${esc(state.modal.qualification || "")}" /></div>
+          <div><label>Major / Specialization</label><input id="at-major" placeholder="e.g. Dzongkha" value="${esc(state.modal.major || "")}" /></div>
+          <div><label>Employee ID</label><input id="at-employeeid" placeholder="e.g. TCH-014" value="${esc(state.modal.employeeId || "")}" /></div>
+          <div><label>Date Joined</label><input type="date" id="at-datejoined" value="${esc(state.modal.dateJoined || "")}" /></div>
+          <div><label>Email</label><input type="email" id="at-email" placeholder="e.g. name@example.com" value="${esc(state.modal.email || "")}" /></div>
         </div>
         ${isEditing ? `<div style="font-size:12px; color:#9aa2b1; margin-top:8px;">Changing the name also renames their Google Drive folder, so existing files stay linked.</div>` : ""}
         <button class="btn btn-dark" style="width:100%; justify-content:center; margin-top:18px;" data-action="submit-add-teacher">${isEditing ? "Save Changes" : "Add Teacher"}</button>
@@ -2302,19 +2462,31 @@ function renderAdminPinModal() {
   `;
 }
 
-function renderEditSchoolDataModal() {
+function renderEditStudentsModal() {
+  const breakdown = state.data.studentBreakdown || {};
   return `
     <div class="modal-overlay" data-action="modal-overlay-close">
-      <div class="modal-box" data-stop-close="1" style="max-width:340px;">
+      <div class="modal-box" data-stop-close="1" style="max-width:420px;">
         <div class="modal-head">
-          <div class="modal-title">Edit School Data</div>
+          <div class="modal-title">Edit Student Numbers</div>
           <button class="modal-close" data-action="close-modal">✕</button>
         </div>
         <div class="modal-fields">
-          <div><label>Total Students</label><input type="number" min="0" id="edit-total-students" value="${esc(state.data.totalStudents || "")}" placeholder="e.g. 240" /></div>
+          <div style="display:flex; gap:8px; font-size:11px; color:#6b7488; text-transform:uppercase; letter-spacing:0.03em; padding:0 2px;">
+            <div style="flex:1;">Class</div><div style="width:80px;">Boys</div><div style="width:80px;">Girls</div>
+          </div>
+          ${CLASS_OPTIONS.map((cls) => {
+            const b = breakdown[cls] || {};
+            return `
+              <div style="display:flex; gap:8px; align-items:center;">
+                <div style="flex:1; font-weight:600; font-size:13px;">${esc(cls)}</div>
+                <input type="number" min="0" class="student-boys-input" data-class="${esc(cls)}" value="${esc(b.boys ?? "")}" style="width:80px;" />
+                <input type="number" min="0" class="student-girls-input" data-class="${esc(cls)}" value="${esc(b.girls ?? "")}" style="width:80px;" />
+              </div>
+            `;
+          }).join("")}
         </div>
-        <div class="modal-note" style="margin-top:8px;">Teaching Staff and Non-Teaching Staff counts update automatically from the Teacher Directory and Staff Profile — no need to enter those here.</div>
-        <button class="btn btn-dark" style="width:100%; justify-content:center; margin-top:14px;" data-action="submit-edit-school-data">Save</button>
+        <button class="btn btn-dark" style="width:100%; justify-content:center; margin-top:16px;" data-action="submit-edit-students">Save</button>
       </div>
     </div>
   `;
@@ -2339,6 +2511,13 @@ function renderStaffModal() {
         <div class="modal-fields">
           <div><label>Name</label><input id="staff-name" placeholder="e.g. Pema Lhamo" value="${esc(state.modal.name || "")}" /></div>
           <div><label>Role</label><input id="staff-role" placeholder="e.g. Accountant, Cook, Security Guard" value="${esc(state.modal.role || "")}" /></div>
+          <div><label>Gender</label><select id="staff-gender">${selectOptionsHtml(GENDER_OPTIONS, state.modal.gender || "")}</select></div>
+          <div><label>Qualification</label><input id="staff-qualification" placeholder="e.g. Class X" value="${esc(state.modal.qualification || "")}" /></div>
+          <div><label>Major / Specialization</label><input id="staff-major" placeholder="e.g. Accounting" value="${esc(state.modal.major || "")}" /></div>
+          <div><label>Employee ID</label><input id="staff-employeeid" placeholder="e.g. STF-004" value="${esc(state.modal.employeeId || "")}" /></div>
+          <div><label>Date Joined</label><input type="date" id="staff-datejoined" value="${esc(state.modal.dateJoined || "")}" /></div>
+          <div><label>Phone</label><input id="staff-phone" placeholder="e.g. 17123456" value="${esc(state.modal.phone || "")}" /></div>
+          <div><label>Email</label><input type="email" id="staff-email" placeholder="e.g. name@example.com" value="${esc(state.modal.email || "")}" /></div>
         </div>
         <button class="btn btn-dark" style="width:100%; justify-content:center; margin-top:18px;" data-action="submit-staff">${isEditing ? "Save Changes" : "Add Staff"}</button>
       </div>
@@ -2411,13 +2590,35 @@ function renderNoticeModal(overdueItems, feedbackDocs, leaveNotices, todRemarkNo
   `;
 }
 
-// ---------- Boot loader (purely cosmetic — always takes ~1s, independent of actual data load time) ----------
+
+// Animates each [data-count-target] number counting up from 0 — called right
+// after Home is freshly displayed (initial load, or navigating back to Home),
+// not on every incidental re-render, so it doesn't restart mid-way for unrelated
+// reasons like a toast appearing.
+function animateStatCounters() {
+  document.querySelectorAll("[data-count-target]").forEach((el) => {
+    const target = parseInt(el.dataset.countTarget, 10) || 0;
+    const duration = 900;
+    const start = performance.now();
+    function tick(now) {
+      const elapsed = now - start;
+      const pct = Math.min(1, elapsed / duration);
+      // ease-out — fast at first, settles in gently rather than a linear tick
+      const eased = 1 - Math.pow(1 - pct, 3);
+      el.textContent = Math.round(target * eased);
+      if (pct < 1) requestAnimationFrame(tick);
+      else el.textContent = target;
+    }
+    requestAnimationFrame(tick);
+  });
+}
+
 function runBootLoader() {
   const overlay = document.getElementById("boot-loader");
   const percentEl = document.getElementById("boot-percent");
   const barFill = document.getElementById("boot-bar-fill");
   if (!overlay) return;
-  const duration = 2000;
+  const duration = 1000;
   const start = performance.now();
   function tick(now) {
     const elapsed = now - start;
@@ -2456,7 +2657,12 @@ document.addEventListener("DOMContentLoaded", () => {
     if (action === "logout") return logout();
     if (action === "open-teacher-login") { state.modal = { type: "teacherLogin" }; return render(); }
     if (action === "toggle-admin") return requestAdminMode();
-    if (action === "set-view") { state.view = el.dataset.view; return render(); }
+    if (action === "set-view") {
+      state.view = el.dataset.view;
+      render();
+      if (state.view === "home") animateStatCounters();
+      return;
+    }
     if (action === "open-add-teacher") { state.modal = { type: "addTeacher" }; return render(); }
     if (action === "open-folder") return openFolder(el.dataset.id);
     if (action === "back-to-directory") {
@@ -2693,6 +2899,8 @@ document.addEventListener("DOMContentLoaded", () => {
         type: "addTeacher",
         editingTeacherId: teacher.id,
         name: teacher.name, subject: teacher.subject, phone: teacher.phone, photo: teacher.photo,
+        gender: teacher.gender, qualification: teacher.qualification, major: teacher.major,
+        employeeId: teacher.employeeId, dateJoined: teacher.dateJoined, email: teacher.email,
       };
       return render();
     }
@@ -2702,13 +2910,20 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!name) return;
       const subject = document.getElementById("at-subject").value.trim();
       const phone = document.getElementById("at-phone").value.trim();
+      const gender = document.getElementById("at-gender").value;
+      const qualification = document.getElementById("at-qualification").value.trim();
+      const major = document.getElementById("at-major").value.trim();
+      const employeeId = document.getElementById("at-employeeid").value.trim();
+      const dateJoined = document.getElementById("at-datejoined").value;
+      const email = document.getElementById("at-email").value.trim();
       const photo = state.modal.photo || null;
       const editingTeacherId = state.modal.editingTeacherId;
+      const payload = { name, subject, phone, photo, gender, qualification, major, employeeId, dateJoined, email };
       state.modal = null;
       if (editingTeacherId) {
-        await updateTeacher(editingTeacherId, { name, subject, phone, photo });
+        await updateTeacher(editingTeacherId, payload);
       } else {
-        await addTeacher({ name, subject, phone, photo });
+        await addTeacher(payload);
       }
       return;
     }
@@ -2745,19 +2960,40 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    if (action === "open-edit-school-data") { state.modal = { type: "editSchoolData" }; return render(); }
-    if (action === "submit-edit-school-data") {
-      const value = document.getElementById("edit-total-students").value.trim();
+    if (action === "open-student-details") {
+      state.view = "studentDetails";
+      return render();
+    }
+    if (action === "open-edit-students") { state.modal = { type: "editStudents" }; return render(); }
+    if (action === "submit-edit-students") {
+      const breakdown = {};
+      CLASS_OPTIONS.forEach((cls) => {
+        const boysInput = document.querySelector(`.student-boys-input[data-class="${CSS.escape(cls)}"]`);
+        const girlsInput = document.querySelector(`.student-girls-input[data-class="${CSS.escape(cls)}"]`);
+        const boys = boysInput ? parseInt(boysInput.value, 10) || 0 : 0;
+        const girls = girlsInput ? parseInt(girlsInput.value, 10) || 0 : 0;
+        if (boys || girls) breakdown[cls] = { boys, girls };
+      });
       state.modal = null;
-      await saveTotalStudents(value);
+      await saveStudentBreakdown(breakdown);
       return;
+    }
+
+    if (action === "open-staff-profile") {
+      state.staffProfileTarget = { kind: el.dataset.kind, id: el.dataset.id };
+      state.view = "staffProfile";
+      return render();
     }
 
     if (action === "open-add-staff") { state.modal = { type: "staffForm" }; return render(); }
     if (action === "open-edit-staff") {
       const s = state.data.staff.find((x) => x.id === el.dataset.id);
       if (!s) return;
-      state.modal = { type: "staffForm", editingStaffId: s.id, name: s.name, role: s.role, photo: s.photo };
+      state.modal = {
+        type: "staffForm", editingStaffId: s.id, name: s.name, role: s.role, photo: s.photo,
+        gender: s.gender, qualification: s.qualification, major: s.major,
+        employeeId: s.employeeId, dateJoined: s.dateJoined, phone: s.phone, email: s.email,
+      };
       return render();
     }
     if (action === "remove-staff") {
@@ -2771,11 +3007,20 @@ document.addEventListener("DOMContentLoaded", () => {
       const role = document.getElementById("staff-role").value.trim();
       const photo = state.modal.photo || null;
       const editingStaffId = state.modal.editingStaffId;
+      const extra = {
+        gender: document.getElementById("staff-gender").value,
+        qualification: document.getElementById("staff-qualification").value.trim(),
+        major: document.getElementById("staff-major").value.trim(),
+        employeeId: document.getElementById("staff-employeeid").value.trim(),
+        dateJoined: document.getElementById("staff-datejoined").value,
+        phone: document.getElementById("staff-phone").value.trim(),
+        email: document.getElementById("staff-email").value.trim(),
+      };
       state.modal = null;
       if (editingStaffId) {
-        await updateStaffMember(editingStaffId, name, role, photo);
+        await updateStaffMember(editingStaffId, name, role, photo, extra);
       } else {
-        await addStaffMember(name, role, photo);
+        await addStaffMember(name, role, photo, extra);
       }
       return;
     }
