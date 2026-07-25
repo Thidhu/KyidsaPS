@@ -121,6 +121,7 @@ header.top {
   color: #ffffff; padding: 24px 20px 28px;
   border-bottom: 1px solid rgba(164,131,39,0.5);
   box-shadow: 0 8px 30px rgba(20,33,61,0.25);
+  position: sticky; top: 0; z-index: 40;
 }
 .header-inner {
   display: flex; justify-content: space-between; align-items: flex-start;
