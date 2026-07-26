@@ -285,6 +285,12 @@ button.staff-card:active { transform: scale(0.98); }
 .doc-section { margin-bottom: 22px; }
 .doc-section-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; color: #1e2733; font-weight: 700; flex-wrap: wrap; }
 .doc-section-head span:first-child { font-family: 'Fraunces', serif; font-size: 15.5px; letter-spacing: 0.01em; }
+/* On Home, these headers sit directly on the blurred photo background (no card
+   behind them), so the usual dark color loses contrast in brighter spots of the
+   photo. White + a soft shadow reads clearly no matter what's behind it. */
+body.home-view main > .doc-section > .doc-section-head {
+  color: #ffffff; text-shadow: 0 1px 4px rgba(0,0,0,0.55);
+}
 .doc-section-head .count {
   font-size: 11px; color: #45526b; font-weight: 600; background: rgba(20,33,61,0.07);
   padding: 2px 9px; border-radius: 10px;
@@ -308,6 +314,13 @@ button.staff-card:active { transform: scale(0.98); }
 .doc-row .del { background: transparent; border: none; color: #7c1d2e; padding: 4px; }
 .doc-row .open-link { color: #45526b; text-decoration: none; padding: 4px; font-size: 13px; }
 .doc-row .open-link:hover { color: #14213d; }
+
+.facebook-fallback-link {
+  display: flex; align-items: center; gap: 10px; margin-top: 10px;
+  background: rgba(20,33,61,0.05); border: 1px solid rgba(20,33,61,0.1); border-radius: 10px;
+  padding: 10px 12px; font-size: 12.5px; color: #45526b; text-decoration: none; max-width: 500px;
+}
+.facebook-fallback-link:hover { background: rgba(20,33,61,0.09); color: #14213d; }
 .doc-row .folder-nav-btn {
   flex: 1; background: transparent; border: none; text-align: left; font-size: 13.5px;
   color: #1e2733; font-weight: 600; cursor: pointer; padding: 0;
