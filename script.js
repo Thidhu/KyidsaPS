@@ -1,6 +1,6 @@
 // ---------- Constants ----------
 // PASTE YOUR APPS SCRIPT WEB APP URL HERE (from Deploy > New deployment)
-const BACKEND_URL = "https://script.google.com/macros/s/AKfycbxgrHC9TYr6ghcCWDci3vZ9Al-dNhEvDMy-bnT9tVddEK4yVjBx-UdiG1UqgjnIOrCFDQ/exec";
+const BACKEND_URL = "https://script.google.com/macros/s/AKfycbwg8Ewe8O2fyb_HN87zvKafdLiPRdMNCrwd2b6-2Q_3rQ1xYRKZCA4qWUDkHZIO4zlcTw/exec";
 
 // Put your welcome sound file (e.g. "audio/welcome.mp3") in your project folder,
 // then update this path if needed. If the file is missing, playback just silently
@@ -54,7 +54,7 @@ const LEAVE_FORM_URL = "https://forms.gle/4PyP1VapqVohfvvG8";
 // since most external sites block being shown in an iframe.
 const TIMETABLE_GENERATOR_URL = "https://thinleywangchuk478.github.io/TIME-TABLE-GENERATOR/";
 const EMIS_URL = "https://portal.education.gov.bt/";
-const FACEBOOK_PAGE_URL = "https://www.facebook.com/share/14kyqDPF8ce/?mibextid=wwXIfr"; // e.g. "https://www.facebook.com/YourSchoolPageName"
+const FACEBOOK_PAGE_URL = "https://www.facebook.com/people/Kyidsa-Primary-School-Samtse/61592482827385/";
 const SCHOOL_LOCATION_QUERY = "Kyidsa Primary School, Norbugang Gewog, Samtse Dzongkhag, Bhutan"; // used for the footer map — replace with exact coordinates (e.g. "27.xxxx,88.xxxx") if the name search isn't accurate enough
 
 function emptyData() {
@@ -1469,17 +1469,26 @@ function renderFacebookSection() {
       </div>
     `;
   }
-  const embedSrc = "https://www.facebook.com/plugins/page.php?href=" + encodeURIComponent(FACEBOOK_PAGE_URL) +
+  // Facebook's Page Plugin is more reliable with a clean numeric-ID URL than with
+  // a vanity-slug URL (especially one with sharing-tracker params like ?mibextid=,
+  // &rdid=, &share_url= attached) — pull just the ID out for the embed itself.
+  const fbIdMatch = FACEBOOK_PAGE_URL.match(/(\d{6,})/);
+  const fbEmbedHref = fbIdMatch ? `https://www.facebook.com/${fbIdMatch[1]}` : FACEBOOK_PAGE_URL.split("?")[0];
+  const embedSrc = "https://www.facebook.com/plugins/page.php?href=" + encodeURIComponent(fbEmbedHref) +
     "&tabs=timeline&width=500&height=420&small_header=true&adapt_container_width=true&hide_cover=false&show_facepile=false";
   return `
     <div class="doc-section" style="margin-top:22px;">
       <div class="doc-section-head">
         <span>📘 Facebook Updates</span>
-        <a href="${esc(FACEBOOK_PAGE_URL)}" target="_blank" rel="noopener" style="margin-left:auto; font-size:12.5px; color:#45526b;">View full page ↗</a>
       </div>
       <div class="form-embed-wrap" style="max-width:500px;">
         <iframe src="${esc(embedSrc)}" width="100%" height="420" style="border:none; overflow:hidden;" scrolling="no" frameborder="0" allowfullscreen="true" allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share">Loading…</iframe>
       </div>
+      <a href="${esc(FACEBOOK_PAGE_URL.split("?")[0])}" target="_blank" rel="noopener" class="facebook-fallback-link">
+        <span>📘</span>
+        <span style="flex:1;">Preview above blank? Some browsers block it — tap to open our Facebook page directly</span>
+        <span style="color:#9aa2b1;">↗</span>
+      </a>
     </div>
   `;
 }
@@ -1489,12 +1498,12 @@ function renderHome() {
   const importantLinks = [
     ...PORTFOLIO_LINKS,
     { label: "Timetable Generator", url: TIMETABLE_GENERATOR_URL, icon: "🗓️" },
-    { label: "EMIS", url: EMIS_URL, icon: "🏫" },
+    { label: "https://systems.education.gov.bt/logout", url: EMIS_URL, icon: "🏫" },
   ];
   return `
     <div class="hero-panel">
       <img class="hero-logo" src="${esc(LOGO_URL)}" alt="Kyidsa Primary School logo" onerror="this.style.display='none'" />
-      <h2 class="serif" style="font-size:24px; margin:0 0 6px;">Kyidsa Primary School Portal</h2>
+      <h2 class="serif" style="font-size:24px; margin:0 0 6px;">Digital Space<br>Kyidsa Primary School</h2>
       <div style="font-size:13.5px; color:#dfe4f0; margin-bottom:20px;">Everything the school needs, in one place.</div>
       <button class="btn btn-ghost" data-action="set-view" data-view="directory">👩‍🏫 Go to Teacher Directory</button>
     </div>
@@ -1596,8 +1605,8 @@ function renderStudentDetails() {
 // ---------- Staff Directory (the actual grid of cards, one level in from Home) ----------
 function renderStaffDirectory() {
   const isPrincipal = state.adminMode && !state.session;
-  const teachingCards = state.data.teachers.map((t) => renderStaffDirCard(t.id, "teacher", t.name, t.subject || "Teaching Staff", t.photo));
-  const nonTeachingCards = state.data.staff.map((s) => renderStaffDirCard(s.id, "staff", s.name, s.role || "Staff", s.photo));
+  const teachingCards = state.data.teachers.map((t) => renderStaffDirCard(t.id, "teacher", t.name, t.subject || "Teaching Staff", t.photo)).join("");
+  const nonTeachingCards = state.data.staff.map((s) => renderStaffDirCard(s.id, "staff", s.name, s.role || "Staff", s.photo)).join("");
   return `
     <button class="btn btn-plain" data-action="set-view" data-view="home">⬅ Back to Home</button>
     <div class="section-head">
