@@ -1,6 +1,6 @@
 // ---------- Constants ----------
 // PASTE YOUR APPS SCRIPT WEB APP URL HERE (from Deploy > New deployment)
-const BACKEND_URL = "https://script.google.com/macros/s/AKfycbxgrHC9TYr6ghcCWDci3vZ9Al-dNhEvDMy-bnT9tVddEK4yVjBx-UdiG1UqgjnIOrCFDQ/exec";
+const BACKEND_URL = "https://script.google.com/macros/s/AKfycbwg8Ewe8O2fyb_HN87zvKafdLiPRdMNCrwd2b6-2Q_3rQ1xYRKZCA4qWUDkHZIO4zlcTw/exec";
 
 // Put your welcome sound file (e.g. "audio/welcome.mp3") in your project folder,
 // then update this path if needed. If the file is missing, playback just silently
@@ -15,7 +15,7 @@ const LOGO_URL = "images/logo.png";
 const CATEGORY_LABEL = { lessonPlan: "Lesson Plan", otherDocuments: "Other Document" };
 
 const CLASS_OPTIONS = ["Class PP", "Class I", "Class II", "Class III", "Class IV", "Class V", "Class VI"];
-const SUBJECT_OPTIONS = ["English", "Dzongkha", "Mathematics", "Science", "ICT", "Science & Technology", "DTI", "Arts", "HPE"];
+const SUBJECT_OPTIONS = ["English", "Dzongkha", "Mathematics", "Science", "ICT", "DTI", "Arts", "HPE"];
 const GENDER_OPTIONS = ["Male", "Female"];
 
 // Builds <option> tags for a fixed list, plus the currently-saved value if it's
@@ -56,6 +56,7 @@ const TIMETABLE_GENERATOR_URL = "https://thinleywangchuk478.github.io/TIME-TABLE
 const EMIS_URL = "https://portal.education.gov.bt/";
 const FACEBOOK_PAGE_URL = "https://www.facebook.com/people/Kyidsa-Primary-School-Samtse/61592482827385/";
 const SCHOOL_LOCATION_QUERY = "Kyidsa Primary School, Norbugang Gewog, Samtse Dzongkhag, Bhutan"; // used for the footer map — replace with exact coordinates (e.g. "27.xxxx,88.xxxx") if the name search isn't accurate enough
+const SCHOOL_INVENTORY_URL = "https://docs.google.com/spreadsheets/d/1j2vFFfvJw4yw3MFr8E1Qv3nwX_ngA2ZCRDN2jaP_Nds/edit?gid=0#gid=0"; // e.g. "https://docs.google.com/spreadsheets/d/xxxxx/edit"
 
 function emptyData() {
   return {
@@ -78,6 +79,7 @@ function emptyData() {
     teacherPins: {},
     staff: [],
     studentBreakdown: {}, // { "Class III": { boys: 12, girls: 10 }, ... }
+    scheduledUploads: [],
   };
 }
 
@@ -688,6 +690,12 @@ function backendToState(raw) {
     studentBreakdown = {};
   }
 
+  const scheduledUploads = (raw.scheduledUploads || []).map((s) => ({
+    id: s.ID, teacherId: s.TeacherID, category: s.Category, fileName: s.FileName,
+    docName: s.DocName || "", docClass: s.Class || "", docSubject: s.Subject || "",
+    scheduledDate: s.ScheduledDate || "", status: s.Status || "pending",
+  }));
+
   return {
     teachers, documents, schedules, overrides,
     adminPin: settings.adminPin || null,
@@ -700,6 +708,7 @@ function backendToState(raw) {
     customFolders, links,
     teacherPins, staff,
     studentBreakdown,
+    scheduledUploads,
   };
 }
 
@@ -924,6 +933,62 @@ async function removeDocument(id) {
   }
   render();
   showToast(res && res.success ? "Document removed" : "Failed to remove");
+}
+
+async function scheduleDocumentUpload(doc) {
+  const teacher = state.data.teachers.find((t) => t.id === doc.teacherId);
+  const res = await apiPost({
+    action: "scheduleUpload",
+    teacherId: doc.teacherId,
+    teacherName: teacher ? teacher.name : "Unknown",
+    category: doc.category,
+    fileName: doc.fileName,
+    docName: doc.docName || "",
+    class: doc.docClass || "",
+    subject: doc.docSubject || "",
+    mimeType: doc.mimeType,
+    fileBase64: doc.dataUrl,
+    scheduledDate: doc.scheduledDate,
+  });
+  if (res && res.success) {
+    state.data.scheduledUploads.push({
+      id: res.id, teacherId: doc.teacherId, category: doc.category, fileName: doc.fileName,
+      docName: doc.docName, docClass: doc.docClass, docSubject: doc.docSubject,
+      scheduledDate: doc.scheduledDate, status: "pending",
+    });
+    state.saveError = "";
+  } else {
+    state.saveError = "Could not schedule upload: " + (res && res.error ? res.error : "please try again.");
+  }
+  render();
+  showToast(res && res.success ? `Scheduled for ${fmtDate(doc.scheduledDate)}` : "Failed to schedule");
+}
+
+async function cancelScheduledUploadItem(id) {
+  const prev = state.data.scheduledUploads;
+  state.data.scheduledUploads = state.data.scheduledUploads.filter((s) => s.id !== id);
+  render();
+  const res = await apiPost({ action: "cancelScheduledUpload", scheduleId: id });
+  if (!(res && res.success)) {
+    state.data.scheduledUploads = prev;
+    state.saveError = "Could not cancel. Please try again.";
+    render();
+  }
+  showToast(res && res.success ? "Scheduled upload cancelled" : "Failed to cancel");
+}
+
+async function rescheduleUploadItem(id, newDate) {
+  const target = state.data.scheduledUploads.find((s) => s.id === id);
+  const prevDate = target ? target.scheduledDate : null;
+  if (target) target.scheduledDate = newDate;
+  render();
+  const res = await apiPost({ action: "rescheduleUpload", scheduleId: id, scheduledDate: newDate });
+  if (!(res && res.success)) {
+    if (target) target.scheduledDate = prevDate;
+    state.saveError = "Could not reschedule. Please try again.";
+    render();
+  }
+  showToast(res && res.success ? "Rescheduled" : "Failed to reschedule");
 }
 
 async function updateSchedule(category, schedule) {
@@ -1362,11 +1427,15 @@ function render() {
 }
 
 function renderTabs() {
+  const inventoryReady = SCHOOL_INVENTORY_URL && !SCHOOL_INVENTORY_URL.startsWith("PASTE_");
   return `
     <div class="tabs">
       <button class="btn btn-tab ${state.view === "home" ? "active" : ""}" data-action="set-view" data-view="home">🏠 Home</button>
       <button class="btn btn-tab ${state.view === "directory" ? "active" : ""}" data-action="set-view" data-view="directory">Directory</button>
       <button class="btn btn-tab ${state.view === "dashboard" ? "active" : ""}" data-action="set-view" data-view="dashboard">📊 Dashboard</button>
+      ${inventoryReady
+        ? `<a class="btn btn-tab" href="${esc(SCHOOL_INVENTORY_URL)}" target="_blank" rel="noopener">📦 Inventory</a>`
+        : `<button class="btn btn-tab" data-action="inventory-not-set-up">📦 Inventory</button>`}
     </div>
   `;
 }
@@ -1498,12 +1567,12 @@ function renderHome() {
   const importantLinks = [
     ...PORTFOLIO_LINKS,
     { label: "Timetable Generator", url: TIMETABLE_GENERATOR_URL, icon: "🗓️" },
-    { label: "https://systems.education.gov.bt/logout", url: EMIS_URL, icon: "🏫" },
+    { label: "EMIS", url: EMIS_URL, icon: "🏫" },
   ];
   return `
     <div class="hero-panel">
       <img class="hero-logo" src="${esc(LOGO_URL)}" alt="Kyidsa Primary School logo" onerror="this.style.display='none'" />
-      <h2 class="serif" style="font-size:24px; margin:0 0 6px;">Digital Space<br>Kyidsa Primary School</h2>
+      <h2 class="serif" style="font-size:24px; margin:0 0 6px;">Kyidsa Primary School Portal</h2>
       <div style="font-size:13.5px; color:#dfe4f0; margin-bottom:20px;">Everything the school needs, in one place.</div>
       <button class="btn btn-ghost" data-action="set-view" data-view="directory">👩‍🏫 Go to Teacher Directory</button>
     </div>
@@ -2084,6 +2153,7 @@ function renderFolder(teacher) {
     ${canUpload ? renderTeacherServicesSection() : ""}
 
     ${canUpload ? renderUploadBox() : ""}
+    ${canUpload ? renderScheduledUploadsSection(teacher) : ""}
 
     ${renderTeacherRemarksSection(teacher)}
     ${renderTeacherLeaveSection(teacher)}
@@ -2237,6 +2307,32 @@ function renderTeacherServicesSection() {
   `;
 }
 
+function renderScheduledUploadsSection(teacher) {
+  const items = state.data.scheduledUploads
+    .filter((s) => s.teacherId === teacher.id && s.status !== "submitted")
+    .sort((a, b) => (a.scheduledDate || "").localeCompare(b.scheduledDate || ""));
+  if (items.length === 0) return "";
+  return `
+    <div class="doc-section">
+      <div class="doc-section-head">
+        <span style="font-weight:700; font-size:15px;">📅 Scheduled Uploads</span>
+        <span class="count">(${items.length})</span>
+      </div>
+      ${items.map((s) => `
+        <div class="doc-item">
+          <div class="doc-row" style="gap:10px; flex-wrap:wrap;">
+            <span style="flex:1;">📄 ${esc(s.category === "otherDocuments" && s.docName ? s.docName : s.fileName)}</span>
+            <span class="date">${CATEGORY_LABEL[s.category] || s.category}</span>
+            <input type="date" class="reschedule-date-input" data-id="${s.id}" value="${esc(s.scheduledDate)}" style="width:150px;" />
+            <button class="btn btn-tab btn-sm" data-action="reschedule-upload" data-id="${s.id}">Save</button>
+            <button class="btn btn-danger btn-sm" data-action="cancel-scheduled-upload" data-id="${s.id}">🗑 Cancel</button>
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
 function renderUploadBox() {
   const p = state.pendingUpload;
 
@@ -2270,9 +2366,16 @@ function renderUploadBox() {
         <div class="doc-row" style="margin-top:2px;">
           <span style="flex:1;">📄 ${esc(p.fileName)}</span>
         </div>
+        <div class="upload-row" style="margin-top:10px; align-items:flex-end;">
+          <div class="upload-field" style="min-width:160px;">
+            <label>Schedule for (optional)</label>
+            <input type="date" id="staged-schedule-date" ${state.busyUpload ? "disabled" : ""} />
+          </div>
+          <button class="btn btn-tab" data-action="schedule-staged-upload" ${state.busyUpload ? "disabled" : ""}>📅 Schedule</button>
+        </div>
         <div class="upload-row" style="margin-top:10px;">
           <button class="btn btn-danger" data-action="cancel-staged-upload" ${state.busyUpload ? "disabled" : ""}>🗑 Remove</button>
-          <button class="btn btn-dark" data-action="submit-staged-upload" ${state.busyUpload ? "disabled" : ""}>${state.busyUpload ? "Submitting…" : "✅ Submit"}</button>
+          <button class="btn btn-dark" data-action="submit-staged-upload" ${state.busyUpload ? "disabled" : ""}>${state.busyUpload ? "Submitting…" : "✅ Submit now"}</button>
         </div>
       </div>
     `;
@@ -2702,7 +2805,7 @@ function runBootLoader() {
   const percentEl = document.getElementById("boot-percent");
   const barFill = document.getElementById("boot-bar-fill");
   if (!overlay) return;
-  const duration = 1000;
+  const duration = 2000;
   const start = performance.now();
   function tick(now) {
     const elapsed = now - start;
@@ -2774,6 +2877,11 @@ document.addEventListener("DOMContentLoaded", () => {
       return render();
     }
 
+    if (action === "inventory-not-set-up") {
+      alert("Inventory link isn't set up yet. Paste your Google Sheet URL into SCHOOL_INVENTORY_URL near the top of script.js.");
+      return;
+    }
+
     if (action === "open-external") {
       const url = el.dataset.url;
       if (!url || url.startsWith("PASTE_")) {
@@ -2793,6 +2901,55 @@ document.addEventListener("DOMContentLoaded", () => {
     if (action === "cancel-staged-upload") {
       state.pendingUpload = null;
       return render();
+    }
+
+    if (action === "reschedule-upload") {
+      const input = document.querySelector(`.reschedule-date-input[data-id="${el.dataset.id}"]`);
+      const newDate = input ? input.value : "";
+      if (!newDate) { alert("Pick a date first."); return; }
+      await rescheduleUploadItem(el.dataset.id, newDate);
+      return;
+    }
+    if (action === "cancel-scheduled-upload") {
+      if (!confirm("Cancel this scheduled upload? The file will be deleted.")) return;
+      await cancelScheduledUploadItem(el.dataset.id);
+      return;
+    }
+
+    if (action === "schedule-staged-upload") {
+      const p = state.pendingUpload;
+      if (!p) return;
+      const dateInput = document.getElementById("staged-schedule-date");
+      const scheduledDate = dateInput ? dateInput.value : "";
+      if (!scheduledDate) { alert("Pick a date first."); return; }
+      if (p.category === "otherDocuments" && !p.docName.trim()) {
+        alert("Please give this document a name first.");
+        return;
+      }
+      if (p.category === "lessonPlan" && (!p.docClass.trim() || !p.docSubject.trim())) {
+        alert("Please fill in the Class and Subject first.");
+        return;
+      }
+      state.busyUpload = true;
+      render();
+      try {
+        await scheduleDocumentUpload({
+          teacherId: state.activeTeacherId,
+          category: p.category,
+          fileName: p.fileName,
+          docName: p.category === "otherDocuments" ? p.docName.trim() : undefined,
+          docClass: p.category === "lessonPlan" ? p.docClass.trim() : undefined,
+          docSubject: p.category === "lessonPlan" ? p.docSubject.trim() : undefined,
+          mimeType: p.mimeType,
+          dataUrl: p.dataUrl,
+          scheduledDate,
+        });
+      } finally {
+        state.pendingUpload = null;
+        state.busyUpload = false;
+        render();
+      }
+      return;
     }
 
     if (action === "submit-staged-upload") {
