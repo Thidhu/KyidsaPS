@@ -1572,7 +1572,7 @@ function renderHome() {
   return `
     <div class="hero-panel">
       <img class="hero-logo" src="${esc(LOGO_URL)}" alt="Kyidsa Primary School logo" onerror="this.style.display='none'" />
-      <h2 class="serif" style="font-size:24px; margin:0 0 6px;">Kyidsa Primary School Portal</h2>
+      <h2 class="serif" style="font-size:24px; margin:0 0 6px;">Digital Space<br> Kyidsa Primary School</h2>
       <div style="font-size:13.5px; color:#dfe4f0; margin-bottom:20px;">Everything the school needs, in one place.</div>
       <button class="btn btn-ghost" data-action="set-view" data-view="directory">👩‍🏫 Go to Teacher Directory</button>
     </div>
