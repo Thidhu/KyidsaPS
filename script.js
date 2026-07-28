@@ -1,6 +1,6 @@
 // ---------- Constants ----------
 // PASTE YOUR APPS SCRIPT WEB APP URL HERE (from Deploy > New deployment)
-const BACKEND_URL = "https://script.google.com/macros/s/AKfycbzW44ioP3GYSIKZe9svvwHAM6vMFTC_FVzDvRMVolZy0YWTO1_n2_HzVvCw5VOkJr35/exec";
+const BACKEND_URL = "https://script.google.com/macros/s/AKfycbwg8Ewe8O2fyb_HN87zvKafdLiPRdMNCrwd2b6-2Q_3rQ1xYRKZCA4qWUDkHZIO4zlcTw/exec";
 
 // Put your welcome sound file (e.g. "audio/welcome.mp3") in your project folder,
 // then update this path if needed. If the file is missing, playback just silently
@@ -15,7 +15,7 @@ const LOGO_URL = "images/logo.png";
 const CATEGORY_LABEL = { lessonPlan: "Lesson Plan", otherDocuments: "Other Document" };
 
 const CLASS_OPTIONS = ["Class PP", "Class I", "Class II", "Class III", "Class IV", "Class V", "Class VI"];
-const SUBJECT_OPTIONS = ["English", "Dzongkha", "Mathematics", "Science", "ICT", "Science & Technology", "DTI", "Arts", "HPE"];
+const SUBJECT_OPTIONS = ["English", "Dzongkha", "Mathematics", "Science", "ICT", "DTI", "Arts", "HPE"];
 const GENDER_OPTIONS = ["Male", "Female"];
 
 // Builds <option> tags for a fixed list, plus the currently-saved value if it's
@@ -2417,7 +2417,7 @@ function renderUploadBox() {
               ${shared.category === "otherDocuments" ? `<input type="text" class="staged-doc-name-input" data-index="${i}" value="${esc(p.docName || "")}" placeholder="Document name" style="width:170px;" ${state.busyUpload ? "disabled" : ""} />` : ""}
               <input type="date" class="staged-date-input" data-index="${i}" value="${esc(p.scheduledDate || "")}" style="width:150px;" ${state.busyUpload ? "disabled" : ""} />
               <button class="btn btn-tab btn-sm" data-action="schedule-staged-item" data-index="${i}" ${state.busyUpload ? "disabled" : ""}>📅 Schedule</button>
-              <button class="btn btn-dark btn-sm" data-action="submit-staged-item" data-index="${i}" ${state.busyUpload ? "disabled" : ""}>✅ Submit Now</button>
+              <button class="btn btn-dark btn-sm" data-action="submit-staged-item" data-index="${i}" ${state.busyUpload ? "disabled" : ""}>✅ Now</button>
               <button class="btn btn-danger btn-sm" data-action="cancel-staged-item" data-index="${i}" ${state.busyUpload ? "disabled" : ""}>🗑</button>
             </div>
           </div>
@@ -3476,6 +3476,21 @@ document.addEventListener("DOMContentLoaded", () => {
     const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
     if (files.length === 0) return;
     await stageFiles(files);
+  });
+
+  // Enter key submits the current modal — works for any modal generically, since
+  // they all use .btn-dark for their one primary action (Unlock, Save Changes,
+  // Add Teacher, Schedule, etc.). Skipped inside a <textarea> so Enter can still
+  // insert a normal newline there instead of submitting.
+  document.getElementById("app").addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || e.target.tagName === "TEXTAREA") return;
+    const modalBox = e.target.closest(".modal-box");
+    if (!modalBox) return;
+    const primaryBtn = modalBox.querySelector(".btn-dark[data-action]");
+    if (primaryBtn) {
+      e.preventDefault();
+      primaryBtn.click();
+    }
   });
 
   // Text input tracking for Add Teacher modal (so values survive re-render, e.g. after photo upload)
