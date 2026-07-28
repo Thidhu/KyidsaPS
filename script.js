@@ -15,7 +15,7 @@ const LOGO_URL = "images/logo.png";
 const CATEGORY_LABEL = { lessonPlan: "Lesson Plan", otherDocuments: "Other Document" };
 
 const CLASS_OPTIONS = ["Class PP", "Class I", "Class II", "Class III", "Class IV", "Class V", "Class VI"];
-const SUBJECT_OPTIONS = ["English", "Dzongkha", "Mathematics", "Science", "ICT", "DTI", "Arts", "HPE"];
+const SUBJECT_OPTIONS = ["English", "Dzongkha", "Mathematics", "Science", "ICT", "Science & Technology", "DTI", "Arts", "HPE"];
 const GENDER_OPTIONS = ["Male", "Female"];
 
 // Builds <option> tags for a fixed list, plus the currently-saved value if it's
@@ -2643,11 +2643,11 @@ function renderTeacherLoginModal() {
             <div>
               <label>Select your name</label>
               <select id="login-teacher-select">
+                <option value="">Choose…</option>
                 ${teachers.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join("")}
               </select>
             </div>
             ${state.modal.error ? `<div class="modal-error">${esc(state.modal.error)}</div>` : ""}
-            <button class="btn btn-dark" style="justify-content:center;" data-action="submit-teacher-login">Continue to my folder</button>
           </div>
         `}
       </div>
@@ -3390,6 +3390,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Change events (selects, file inputs) — delegated
   document.getElementById("app").addEventListener("change", async (e) => {
+    if (e.target.id === "login-teacher-select") {
+      const teacherId = e.target.value;
+      if (!teacherId) return;
+      state.modal = { type: "teacherPin", teacherId };
+      return render();
+    }
+
     if (e.target.id === "teacher-photo-input") {
       const file = e.target.files[0];
       if (!file) return;
