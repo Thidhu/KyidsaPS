@@ -15,7 +15,7 @@ const LOGO_URL = "images/logo.png";
 const CATEGORY_LABEL = { lessonPlan: "Lesson Plan", otherDocuments: "Other Document" };
 
 const CLASS_OPTIONS = ["Class PP", "Class I", "Class II", "Class III", "Class IV", "Class V", "Class VI"];
-const SUBJECT_OPTIONS = ["English", "Dzongkha", "Mathematics", "Science", "ICT", "Science & Technology", "DTI", "Arts", "HPE"];
+const SUBJECT_OPTIONS = ["English", "Dzongkha", "Mathematics", "Science", "ICT", "DTI", "Arts", "HPE"];
 const GENDER_OPTIONS = ["Male", "Female"];
 
 // Builds <option> tags for a fixed list, plus the currently-saved value if it's
@@ -56,7 +56,7 @@ const TIMETABLE_GENERATOR_URL = "https://thinleywangchuk478.github.io/TIME-TABLE
 const EMIS_URL = "https://portal.education.gov.bt/";
 const FACEBOOK_PAGE_URL = "https://www.facebook.com/people/Kyidsa-Primary-School-Samtse/61592482827385/";
 const SCHOOL_LOCATION_QUERY = "Kyidsa Primary School, Norbugang Gewog, Samtse Dzongkhag, Bhutan"; // used for the footer map — replace with exact coordinates (e.g. "27.xxxx,88.xxxx") if the name search isn't accurate enough
-const SCHOOL_INVENTORY_URL = "https://docs.google.com/spreadsheets/d/1j2vFFfvJw4yw3MFr8E1Qv3nwX_ngA2ZCRDN2jaP_Nds/edit?gid=0#gid=0"; // e.g. "https://docs.google.com/spreadsheets/d/xxxxx/edit"
+const SCHOOL_INVENTORY_URL = "PASTE_YOUR_INVENTORY_SHEET_URL_HERE"; // e.g. "https://docs.google.com/spreadsheets/d/xxxxx/edit"
 
 function emptyData() {
   return {
@@ -96,7 +96,7 @@ const state = {
   saveError: "",
   today: new Date(),
   busyUpload: false,
-  pendingUpload: null, // { category, docName, fileName, mimeType, dataUrl } — staged, not yet submitted
+  pendingUploads: [], // [{ tempId, category, docName, docClass, docSubject, fileName, mimeType, dataUrl, scheduledDate }] — staged, not yet submitted
   audioMuted: false,
   directorySearch: "",
   staffProfileTarget: null, // { kind: "teacher"|"staff", id }
@@ -183,6 +183,45 @@ function readFileAsDataUrl(file) {
     r.onerror = reject;
     r.readAsDataURL(file);
   });
+}
+
+// Shared by both the file-picker's change event and drag-and-drop. Category/Class/
+// Subject are read once from the picker fields and applied to every file in this
+// batch (the common case: a week of lesson plans is the same class & subject,
+// just different days) — "Other Documents" names default to each file's own
+// filename instead, editable per-row afterward.
+async function stageFiles(files) {
+  const categoryEl = document.getElementById("upload-category");
+  const classEl = document.getElementById("upload-class");
+  const subjectEl = document.getElementById("upload-subject");
+  const category = categoryEl ? categoryEl.value : "lessonPlan";
+  const docClass = classEl ? classEl.value.trim() : "";
+  const docSubject = subjectEl ? subjectEl.value.trim() : "";
+  if (category === "lessonPlan" && (!docClass || !docSubject)) {
+    alert("Please fill in the Class and Subject first.");
+    return;
+  }
+  const oversized = files.filter((f) => f.size > 5 * 1024 * 1024);
+  const validFiles = files.filter((f) => f.size <= 5 * 1024 * 1024);
+  if (oversized.length > 0) {
+    alert(`${oversized.length} file(s) are too large (over 5MB) and were skipped: ${oversized.map((f) => f.name).join(", ")}`);
+  }
+  for (const file of validFiles) {
+    const dataUrl = await readFileAsDataUrl(file);
+    const baseName = file.name.replace(/\.[^.]+$/, "");
+    state.pendingUploads.push({
+      tempId: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      category,
+      docName: category === "otherDocuments" ? baseName : "",
+      docClass: category === "lessonPlan" ? docClass : "",
+      docSubject: category === "lessonPlan" ? docSubject : "",
+      fileName: file.name,
+      mimeType: file.type,
+      dataUrl,
+      scheduledDate: "",
+    });
+  }
+  render();
 }
 
 function startOfDay(d) {
@@ -1572,7 +1611,7 @@ function renderHome() {
   return `
     <div class="hero-panel">
       <img class="hero-logo" src="${esc(LOGO_URL)}" alt="Kyidsa Primary School logo" onerror="this.style.display='none'" />
-      <h2 class="serif" style="font-size:24px; margin:0 0 6px;">Digital Space<br> Kyidsa Primary School</h2>
+      <h2 class="serif" style="font-size:24px; margin:0 0 6px;">Kyidsa Primary School Portal</h2>
       <div style="font-size:13.5px; color:#dfe4f0; margin-bottom:20px;">Everything the school needs, in one place.</div>
       <button class="btn btn-ghost" data-action="set-view" data-view="directory">👩‍🏫 Go to Teacher Directory</button>
     </div>
@@ -2334,56 +2373,70 @@ function renderScheduledUploadsSection(teacher) {
 }
 
 function renderUploadBox() {
-  const p = state.pendingUpload;
+  const items = state.pendingUploads;
 
-  if (p) {
+  if (items.length > 0) {
+    const shared = items[0]; // Category/Class/Subject are shared across the whole staged batch
     return `
       <div class="upload-box">
-        <div class="title">Review before submitting</div>
+        <div class="title">Review before submitting (${items.length} file${items.length === 1 ? "" : "s"})</div>
         <div class="upload-row">
           <div class="upload-field">
             <label>Category</label>
             <select id="staged-category" ${state.busyUpload ? "disabled" : ""}>
-              <option value="lessonPlan" ${p.category === "lessonPlan" ? "selected" : ""}>Lesson Plan</option>
-              <option value="otherDocuments" ${p.category === "otherDocuments" ? "selected" : ""}>Other Documents</option>
+              <option value="lessonPlan" ${shared.category === "lessonPlan" ? "selected" : ""}>Lesson Plan</option>
+              <option value="otherDocuments" ${shared.category === "otherDocuments" ? "selected" : ""}>Other Documents</option>
             </select>
           </div>
-          <div class="upload-field" id="staged-lp-fields" style="${p.category === "lessonPlan" ? "display:flex; gap:10px;" : "display:none;"}">
+          <div class="upload-field" id="staged-lp-fields" style="${shared.category === "lessonPlan" ? "display:flex; gap:10px;" : "display:none;"}">
             <div>
               <label>Class</label>
-              <select id="staged-class" ${state.busyUpload ? "disabled" : ""}>${selectOptionsHtml(CLASS_OPTIONS, p.docClass || "")}</select>
+              <select id="staged-class" ${state.busyUpload ? "disabled" : ""}>${selectOptionsHtml(CLASS_OPTIONS, shared.docClass || "")}</select>
             </div>
             <div>
               <label>Subject</label>
-              <select id="staged-subject" ${state.busyUpload ? "disabled" : ""}>${selectOptionsHtml(SUBJECT_OPTIONS, p.docSubject || "")}</select>
+              <select id="staged-subject" ${state.busyUpload ? "disabled" : ""}>${selectOptionsHtml(SUBJECT_OPTIONS, shared.docSubject || "")}</select>
             </div>
           </div>
-          <div class="upload-field" id="staged-doc-name-field" style="${p.category === "otherDocuments" ? "" : "display:none;"}">
-            <label>Document name</label>
-            <input type="text" id="staged-doc-name" value="${esc(p.docName || "")}" placeholder="e.g. Term 2 Attendance Sheet" ${state.busyUpload ? "disabled" : ""} />
+        </div>
+
+        ${items.length > 1 ? `
+          <div class="upload-row" style="margin-top:10px; align-items:flex-end;">
+            <div class="upload-field" style="min-width:160px;">
+              <label>Start date</label>
+              <input type="date" id="staged-bulk-start-date" ${state.busyUpload ? "disabled" : ""} />
+            </div>
+            <button class="btn btn-tab" data-action="auto-assign-dates" ${state.busyUpload ? "disabled" : ""}>🗓 Auto-fill dates (one per day)</button>
           </div>
-        </div>
-        <div class="doc-row" style="margin-top:2px;">
-          <span style="flex:1;">📄 ${esc(p.fileName)}</span>
-        </div>
-        <div class="upload-row" style="margin-top:10px; align-items:flex-end;">
-          <div class="upload-field" style="min-width:160px;">
-            <label>Schedule for (optional)</label>
-            <input type="date" id="staged-schedule-date" ${state.busyUpload ? "disabled" : ""} />
+        ` : ""}
+
+        ${items.map((p, i) => `
+          <div class="doc-item">
+            <div class="doc-row" style="gap:10px; flex-wrap:wrap;">
+              <span style="flex:1; min-width:120px;">📄 ${esc(p.fileName)}</span>
+              ${shared.category === "otherDocuments" ? `<input type="text" class="staged-doc-name-input" data-index="${i}" value="${esc(p.docName || "")}" placeholder="Document name" style="width:170px;" ${state.busyUpload ? "disabled" : ""} />` : ""}
+              <input type="date" class="staged-date-input" data-index="${i}" value="${esc(p.scheduledDate || "")}" style="width:150px;" ${state.busyUpload ? "disabled" : ""} />
+              <button class="btn btn-tab btn-sm" data-action="schedule-staged-item" data-index="${i}" ${state.busyUpload ? "disabled" : ""}>📅 Schedule</button>
+              <button class="btn btn-dark btn-sm" data-action="submit-staged-item" data-index="${i}" ${state.busyUpload ? "disabled" : ""}>✅ Now</button>
+              <button class="btn btn-danger btn-sm" data-action="cancel-staged-item" data-index="${i}" ${state.busyUpload ? "disabled" : ""}>🗑</button>
+            </div>
           </div>
-          <button class="btn btn-tab" data-action="schedule-staged-upload" ${state.busyUpload ? "disabled" : ""}>📅 Schedule</button>
-        </div>
-        <div class="upload-row" style="margin-top:10px;">
-          <button class="btn btn-danger" data-action="cancel-staged-upload" ${state.busyUpload ? "disabled" : ""}>🗑 Remove</button>
-          <button class="btn btn-dark" data-action="submit-staged-upload" ${state.busyUpload ? "disabled" : ""}>${state.busyUpload ? "Submitting…" : "✅ Submit now"}</button>
-        </div>
+        `).join("")}
+
+        ${items.length > 1 ? `
+          <div class="upload-row" style="margin-top:12px;">
+            <button class="btn btn-danger" data-action="cancel-all-staged" ${state.busyUpload ? "disabled" : ""}>🗑 Remove All</button>
+            <button class="btn btn-tab" data-action="schedule-all-staged" ${state.busyUpload ? "disabled" : ""}>📅 Schedule All (using dates above)</button>
+            <button class="btn btn-dark" data-action="submit-all-staged" ${state.busyUpload ? "disabled" : ""}>${state.busyUpload ? "Submitting…" : "✅ Submit All Now"}</button>
+          </div>
+        ` : ""}
       </div>
     `;
   }
 
   return `
-    <div class="upload-box">
-      <div class="title">Upload a document</div>
+    <div class="upload-box" id="upload-dropzone">
+      <div class="title">Upload document(s)</div>
       <div class="upload-row">
         <div class="upload-field">
           <label>Category</label>
@@ -2402,13 +2455,10 @@ function renderUploadBox() {
             <select id="upload-subject">${selectOptionsHtml(SUBJECT_OPTIONS, "")}</select>
           </div>
         </div>
-        <div class="upload-field" id="doc-name-field" style="display:none;">
-          <label>Document name</label>
-          <input type="text" id="upload-doc-name" placeholder="e.g. Term 2 Attendance Sheet" />
-        </div>
-        <button class="btn btn-dark" id="choose-file-btn">📤 Choose File</button>
-        <input type="file" id="upload-file-input" style="display:none;" />
+        <button class="btn btn-dark" id="choose-file-btn">📤 Choose File(s)</button>
+        <input type="file" id="upload-file-input" multiple style="display:none;" />
       </div>
+      <div class="dropzone-hint">…or drag and drop files here (e.g. a whole week of lesson plans at once)</div>
     </div>
   `;
 }
@@ -2805,7 +2855,7 @@ function runBootLoader() {
   const percentEl = document.getElementById("boot-percent");
   const barFill = document.getElementById("boot-bar-fill");
   if (!overlay) return;
-  const duration = 1000;
+  const duration = 2000;
   const start = performance.now();
   function tick(now) {
     const elapsed = now - start;
@@ -2898,8 +2948,25 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    if (action === "cancel-staged-upload") {
-      state.pendingUpload = null;
+    if (action === "cancel-staged-item") {
+      const idx = parseInt(el.dataset.index, 10);
+      state.pendingUploads.splice(idx, 1);
+      return render();
+    }
+    if (action === "cancel-all-staged") {
+      state.pendingUploads = [];
+      return render();
+    }
+    if (action === "auto-assign-dates") {
+      const startInput = document.getElementById("staged-bulk-start-date");
+      const startVal = startInput ? startInput.value : "";
+      if (!startVal) { alert("Pick a start date first."); return; }
+      const start = new Date(startVal + "T00:00:00");
+      state.pendingUploads.forEach((p, i) => {
+        const d = new Date(start);
+        d.setDate(d.getDate() + i);
+        p.scheduledDate = d.toISOString().slice(0, 10);
+      });
       return render();
     }
 
@@ -2916,12 +2983,10 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    if (action === "schedule-staged-upload") {
-      const p = state.pendingUpload;
+    if (action === "schedule-staged-item" || action === "submit-staged-item") {
+      const idx = parseInt(el.dataset.index, 10);
+      const p = state.pendingUploads[idx];
       if (!p) return;
-      const dateInput = document.getElementById("staged-schedule-date");
-      const scheduledDate = dateInput ? dateInput.value : "";
-      if (!scheduledDate) { alert("Pick a date first."); return; }
       if (p.category === "otherDocuments" && !p.docName.trim()) {
         alert("Please give this document a name first.");
         return;
@@ -2930,60 +2995,81 @@ document.addEventListener("DOMContentLoaded", () => {
         alert("Please fill in the Class and Subject first.");
         return;
       }
+      let scheduledDate = "";
+      if (action === "schedule-staged-item") {
+        scheduledDate = p.scheduledDate;
+        if (!scheduledDate) { alert("Pick a date first."); return; }
+      }
       state.busyUpload = true;
       render();
       try {
-        await scheduleDocumentUpload({
-          teacherId: state.activeTeacherId,
-          category: p.category,
-          fileName: p.fileName,
-          docName: p.category === "otherDocuments" ? p.docName.trim() : undefined,
-          docClass: p.category === "lessonPlan" ? p.docClass.trim() : undefined,
-          docSubject: p.category === "lessonPlan" ? p.docSubject.trim() : undefined,
-          mimeType: p.mimeType,
-          dataUrl: p.dataUrl,
-          scheduledDate,
-        });
+        if (action === "schedule-staged-item") {
+          await scheduleDocumentUpload({
+            teacherId: state.activeTeacherId, category: p.category, fileName: p.fileName,
+            docName: p.category === "otherDocuments" ? p.docName.trim() : undefined,
+            docClass: p.category === "lessonPlan" ? p.docClass.trim() : undefined,
+            docSubject: p.category === "lessonPlan" ? p.docSubject.trim() : undefined,
+            mimeType: p.mimeType, dataUrl: p.dataUrl, scheduledDate,
+          });
+        } else {
+          await addDocument({
+            teacherId: state.activeTeacherId, category: p.category, fileName: p.fileName,
+            docName: p.category === "otherDocuments" ? p.docName.trim() : undefined,
+            docClass: p.category === "lessonPlan" ? p.docClass.trim() : undefined,
+            docSubject: p.category === "lessonPlan" ? p.docSubject.trim() : undefined,
+            mimeType: p.mimeType, dataUrl: p.dataUrl, uploadedAt: new Date().toISOString(),
+          });
+        }
+        state.pendingUploads = state.pendingUploads.filter((x) => x.tempId !== p.tempId);
       } finally {
-        state.pendingUpload = null;
         state.busyUpload = false;
         render();
       }
       return;
     }
 
-    if (action === "submit-staged-upload") {
-      const p = state.pendingUpload;
-      if (!p) return;
-      if (p.category === "otherDocuments" && !p.docName.trim()) {
-        alert("Please give this document a name first.");
+    if (action === "submit-all-staged" || action === "schedule-all-staged") {
+      const forSchedule = action === "schedule-all-staged";
+      if (state.pendingUploads.some((p) => p.category === "otherDocuments" && !p.docName.trim())) {
+        alert("Please give every document a name first.");
         return;
       }
-      if (p.category === "lessonPlan" && (!p.docClass.trim() || !p.docSubject.trim())) {
+      if (state.pendingUploads.some((p) => p.category === "lessonPlan" && (!p.docClass.trim() || !p.docSubject.trim()))) {
         alert("Please fill in the Class and Subject first.");
+        return;
+      }
+      if (forSchedule && state.pendingUploads.some((p) => !p.scheduledDate)) {
+        alert("Please set a date for every file first (or use Auto-fill dates).");
         return;
       }
       state.busyUpload = true;
       render();
-      try {
-        await addDocument({
-          teacherId: state.activeTeacherId,
-          category: p.category,
-          fileName: p.fileName,
-          docName: p.category === "otherDocuments" ? p.docName.trim() : undefined,
-          docClass: p.category === "lessonPlan" ? p.docClass.trim() : undefined,
-          docSubject: p.category === "lessonPlan" ? p.docSubject.trim() : undefined,
-          mimeType: p.mimeType,
-          dataUrl: p.dataUrl,
-          uploadedAt: new Date().toISOString(),
-        });
-      } finally {
-        state.pendingUpload = null;
-        state.busyUpload = false;
-        render();
+      const items = [...state.pendingUploads];
+      for (const p of items) {
+        if (forSchedule) {
+          await scheduleDocumentUpload({
+            teacherId: state.activeTeacherId, category: p.category, fileName: p.fileName,
+            docName: p.category === "otherDocuments" ? p.docName.trim() : undefined,
+            docClass: p.category === "lessonPlan" ? p.docClass.trim() : undefined,
+            docSubject: p.category === "lessonPlan" ? p.docSubject.trim() : undefined,
+            mimeType: p.mimeType, dataUrl: p.dataUrl, scheduledDate: p.scheduledDate,
+          });
+        } else {
+          await addDocument({
+            teacherId: state.activeTeacherId, category: p.category, fileName: p.fileName,
+            docName: p.category === "otherDocuments" ? p.docName.trim() : undefined,
+            docClass: p.category === "lessonPlan" ? p.docClass.trim() : undefined,
+            docSubject: p.category === "lessonPlan" ? p.docSubject.trim() : undefined,
+            mimeType: p.mimeType, dataUrl: p.dataUrl, uploadedAt: new Date().toISOString(),
+          });
+        }
+        state.pendingUploads = state.pendingUploads.filter((x) => x.tempId !== p.tempId);
       }
+      state.busyUpload = false;
+      render();
       return;
     }
+
     if (action === "close-modal") { state.modal = null; return render(); }
 
     if (action === "export-csv" || action === "print-table") {
@@ -3313,68 +3399,41 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     if (e.target.id === "upload-category") {
-      const docNameField = document.getElementById("doc-name-field");
       const lpFields = document.getElementById("lp-fields");
-      docNameField.style.display = e.target.value === "otherDocuments" ? "block" : "none";
-      lpFields.style.display = e.target.value === "lessonPlan" ? "flex" : "none";
+      if (lpFields) lpFields.style.display = e.target.value === "lessonPlan" ? "flex" : "none";
       return;
     }
 
     if (e.target.id === "upload-file-input") {
-      const file = e.target.files[0];
-      if (!file) return;
-      if (file.size > 5 * 1024 * 1024) {
-        alert("File is too large. Please keep files under 5MB.");
-        e.target.value = "";
-        return;
-      }
-      const category = document.getElementById("upload-category").value;
-      const docNameInput = document.getElementById("upload-doc-name");
-      const docName = docNameInput ? docNameInput.value.trim() : "";
-      const docClass = document.getElementById("upload-class").value.trim();
-      const docSubject = document.getElementById("upload-subject").value.trim();
-      if (category === "otherDocuments" && !docName) {
-        alert("Please give this document a name first.");
-        e.target.value = "";
-        return;
-      }
-      if (category === "lessonPlan" && (!docClass || !docSubject)) {
-        alert("Please fill in the Class and Subject first.");
-        e.target.value = "";
-        return;
-      }
-      // Stage the file for review — it is NOT uploaded yet. The teacher can still
-      // edit the name/category, remove it and pick a different file, or submit it.
-      const dataUrl = await readFileAsDataUrl(file);
-      state.pendingUpload = {
-        category,
-        docName: category === "otherDocuments" ? docName : "",
-        docClass: category === "lessonPlan" ? docClass : "",
-        docSubject: category === "lessonPlan" ? docSubject : "",
-        fileName: file.name,
-        mimeType: file.type,
-        dataUrl,
-      };
-      render();
+      const files = Array.from(e.target.files || []);
+      e.target.value = "";
+      if (files.length === 0) return;
+      await stageFiles(files);
       return;
     }
 
     if (e.target.id === "staged-category") {
-      if (state.pendingUpload) state.pendingUpload.category = e.target.value;
+      const newCategory = e.target.value;
+      state.pendingUploads.forEach((p) => { p.category = newCategory; });
       return render();
     }
   });
 
-  // Keep the staged document name / class / subject in sync as the teacher edits before submitting
+  // Keep the staged batch's shared/per-row fields in sync as the teacher edits before submitting
   document.getElementById("app").addEventListener("input", (e) => {
-    if (e.target.id === "staged-doc-name" && state.pendingUpload) {
-      state.pendingUpload.docName = e.target.value;
+    if (e.target.id === "staged-class") {
+      state.pendingUploads.forEach((p) => { p.docClass = e.target.value; });
     }
-    if (e.target.id === "staged-class" && state.pendingUpload) {
-      state.pendingUpload.docClass = e.target.value;
+    if (e.target.id === "staged-subject") {
+      state.pendingUploads.forEach((p) => { p.docSubject = e.target.value; });
     }
-    if (e.target.id === "staged-subject" && state.pendingUpload) {
-      state.pendingUpload.docSubject = e.target.value;
+    if (e.target.classList.contains("staged-doc-name-input")) {
+      const idx = parseInt(e.target.dataset.index, 10);
+      if (state.pendingUploads[idx]) state.pendingUploads[idx].docName = e.target.value;
+    }
+    if (e.target.classList.contains("staged-date-input")) {
+      const idx = parseInt(e.target.dataset.index, 10);
+      if (state.pendingUploads[idx]) state.pendingUploads[idx].scheduledDate = e.target.value;
     }
     if (e.target.id === "directory-search-input") {
       state.directorySearch = e.target.value;
@@ -3388,6 +3447,28 @@ document.addEventListener("DOMContentLoaded", () => {
       const input = document.getElementById("upload-file-input");
       if (input) input.click();
     }
+  });
+
+  // Drag-and-drop onto the upload box — stages files the same way as the file picker
+  document.getElementById("app").addEventListener("dragover", (e) => {
+    const zone = e.target.closest("#upload-dropzone");
+    if (!zone) return;
+    e.preventDefault();
+    zone.classList.add("dropzone-active");
+  });
+  document.getElementById("app").addEventListener("dragleave", (e) => {
+    const zone = e.target.closest("#upload-dropzone");
+    if (!zone) return;
+    zone.classList.remove("dropzone-active");
+  });
+  document.getElementById("app").addEventListener("drop", async (e) => {
+    const zone = e.target.closest("#upload-dropzone");
+    if (!zone) return;
+    e.preventDefault();
+    zone.classList.remove("dropzone-active");
+    const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
+    if (files.length === 0) return;
+    await stageFiles(files);
   });
 
   // Text input tracking for Add Teacher modal (so values survive re-render, e.g. after photo upload)
