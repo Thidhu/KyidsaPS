@@ -15,7 +15,7 @@ const LOGO_URL = "images/logo.png";
 const CATEGORY_LABEL = { lessonPlan: "Lesson Plan", otherDocuments: "Other Document" };
 
 const CLASS_OPTIONS = ["Class PP", "Class I", "Class II", "Class III", "Class IV", "Class V", "Class VI"];
-const SUBJECT_OPTIONS = ["English", "Dzongkha", "Mathematics", "Science", "ICT", "DTI", "Arts", "HPE"];
+const SUBJECT_OPTIONS = ["English", "Dzongkha", "Mathematics", "Science", "ICT", "DTI", "Science & Technology", "Arts", "HPE"];
 const GENDER_OPTIONS = ["Male", "Female"];
 
 // Builds <option> tags for a fixed list, plus the currently-saved value if it's
@@ -173,7 +173,7 @@ function driveThumb(url, size) {
 
 // ---------- Utils ----------
 function uid() {
-  return Math.random().toString(36).slice(2, 10) + Date.().toString(36);
+  return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
 function readFileAsDataUrl(file) {
@@ -210,7 +210,7 @@ async function stageFiles(files) {
     const dataUrl = await readFileAsDataUrl(file);
     const baseName = file.name.replace(/\.[^.]+$/, "");
     state.pendingUploads.push({
-      tempId: `${Date.()}_${Math.random().toString(36).slice(2)}`,
+      tempId: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
       category,
       docName: category === "otherDocuments" ? baseName : "",
       docClass: category === "lessonPlan" ? docClass : "",
@@ -804,7 +804,7 @@ function restoreNavState() {
 async function loadData() {
   const cached = readLocalCache();
   if (cached) {
-    // Show the last-kn data immediately instead of a blank loading screen,
+    // Show the last-known data immediately instead of a blank loading screen,
     // then quietly refresh with the latest from the backend below.
     state.data = backendToState(cached);
     state.loaded = true;
@@ -939,7 +939,7 @@ async function addDocument(doc) {
   const res = await apiPost({
     action: "addDocument",
     teacherId: doc.teacherId,
-    teacherName: teacher ? teacher.name : "Unkn",
+    teacherName: teacher ? teacher.name : "Unknown",
     category: doc.category,
     fileName: doc.fileName,
     docName: doc.docName || "",
@@ -979,7 +979,7 @@ async function scheduleDocumentUpload(doc) {
   const res = await apiPost({
     action: "scheduleUpload",
     teacherId: doc.teacherId,
-    teacherName: teacher ? teacher.name : "Unkn",
+    teacherName: teacher ? teacher.name : "Unknown",
     category: doc.category,
     fileName: doc.fileName,
     docName: doc.docName || "",
@@ -1332,7 +1332,7 @@ async function saveComment(docId, commentText) {
   const res = await apiPost({ action: "setComment", docId, comment: commentText });
   if (!(res && res.success)) {
     if (doc) { doc.comment = prevComment; doc.commentSeen = prevSeen; }
-    state.saveError = "Could not save feedback: " + (res && res.error ? res.error : "unkn error, please try again.");
+    state.saveError = "Could not save feedback: " + (res && res.error ? res.error : "unknown error, please try again.");
     render();
   }
   showToast(res && res.success ? "Feedback saved" : "Failed to save feedback");
@@ -1611,7 +1611,7 @@ function renderHome() {
   return `
     <div class="hero-panel">
       <img class="hero-logo" src="${esc(LOGO_URL)}" alt="Kyidsa Primary School logo" onerror="this.style.display='none'" />
-      <h2 class="serif" style="font-size:24px; margin:0 0 6px;">Digital Space <br> Kyidsa Primary School</h2>
+      <h2 class="serif" style="font-size:24px; margin:0 0 6px;">Kyidsa Primary School Portal</h2>
       <div style="font-size:13.5px; color:#dfe4f0; margin-bottom:20px;">Everything the school needs, in one place.</div>
       <button class="btn btn-ghost" data-action="set-view" data-view="directory">👩‍🏫 Go to Teacher Directory</button>
     </div>
@@ -2855,7 +2855,7 @@ function runBootLoader() {
   const percentEl = document.getElementById("boot-percent");
   const barFill = document.getElementById("boot-bar-fill");
   if (!overlay) return;
-  const duration = 1000;
+  const duration = 2000;
   const start = performance.now();
   function tick(now) {
     const elapsed = now - start;
