@@ -2423,7 +2423,7 @@ function renderUploadBox() {
               ${shared.category === "otherDocuments" ? `<input type="text" class="staged-doc-name-input" data-index="${i}" value="${esc(p.docName || "")}" placeholder="Document name" style="width:170px;" ${state.busyUpload ? "disabled" : ""} />` : ""}
               <input type="date" class="staged-date-input" data-index="${i}" value="${esc(p.scheduledDate || "")}" style="width:150px;" ${state.busyUpload ? "disabled" : ""} />
               <button class="btn btn-tab btn-sm" data-action="schedule-staged-item" data-index="${i}" ${state.busyUpload ? "disabled" : ""}>📅 Schedule</button>
-              <button class="btn btn-dark btn-sm" data-action="submit-staged-item" data-index="${i}" ${state.busyUpload ? "disabled" : ""}>✅ Now</button>
+              <button class="btn btn-dark btn-sm" data-action="submit-staged-item" data-index="${i}" ${state.busyUpload ? "disabled" : ""}>✅ Submit Now</button>
               <button class="btn btn-danger btn-sm" data-action="cancel-staged-item" data-index="${i}" ${state.busyUpload ? "disabled" : ""}>🗑</button>
             </div>
           </div>
