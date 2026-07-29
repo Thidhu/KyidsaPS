@@ -15,7 +15,7 @@ const LOGO_URL = "images/logo.png";
 const CATEGORY_LABEL = { lessonPlan: "Lesson Plan", otherDocuments: "Other Document" };
 
 const CLASS_OPTIONS = ["Class PP", "Class I", "Class II", "Class III", "Class IV", "Class V", "Class VI"];
-const SUBJECT_OPTIONS = ["English", "Dzongkha", "Mathematics", "Science", "ICT", "DTI", "Science & Technology", "Arts", "HPE"];
+const SUBJECT_OPTIONS = ["English", "Dzongkha", "Mathematics", "Science", "ICT", "DTI", "Arts", "HPE"];
 const GENDER_OPTIONS = ["Male", "Female"];
 
 // Builds <option> tags for a fixed list, plus the currently-saved value if it's
@@ -262,11 +262,16 @@ function computeCalendarDues(schedule, today) {
 function computeLessonPlanStatus(schedule, documents, teacherId, today) {
   const required = (schedule && schedule.requiredCount) || 2;
   const t = startOfDay(today);
+  const dayOfWeek = t.getDay(); // 0 = Sunday, 6 = Saturday
+  const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
   const count = documents.filter((d) => {
     if (d.teacherId !== teacherId || d.category !== "lessonPlan") return false;
     return startOfDay(new Date(d.uploadedAt)).getTime() === t.getTime();
   }).length;
-  return { overdue: count < required, required, count, dueDate: t };
+  if (isWeekend) {
+    return { overdue: false, required, count, dueDate: t, isWeekend: true };
+  }
+  return { overdue: count < required, required, count, dueDate: t, isWeekend: false };
 }
 
 function latestUploadDate(documents, teacherId, category) {
@@ -1611,7 +1616,7 @@ function renderHome() {
   return `
     <div class="hero-panel">
       <img class="hero-logo" src="${esc(LOGO_URL)}" alt="Kyidsa Primary School logo" onerror="this.style.display='none'" />
-      <h2 class="serif" style="font-size:24px; margin:0 0 6px;">Digital SPace<br>Kyidsa Primary School</h2>
+      <h2 class="serif" style="font-size:24px; margin:0 0 6px;">Kyidsa Primary School Portal</h2>
       <div style="font-size:13.5px; color:#dfe4f0; margin-bottom:20px;">Everything the school needs, in one place.</div>
       <button class="btn btn-ghost" data-action="set-view" data-view="directory">👩‍🏫 Go to Teacher Directory</button>
     </div>
@@ -1805,6 +1810,7 @@ function renderTeacherCard(t) {
 }
 
 function lessonPlanPillHtml(status) {
+  if (status.isWeekend) return `<span class="pill pill-none">🌴 Weekend — no submission required</span>`;
   if (status.overdue) return `<span class="pill pill-overdue">⚠ ${status.count}/${status.required} submitted today</span>`;
   return `<span class="pill pill-ok">✅ ${status.count}/${status.required} submitted today</span>`;
 }
@@ -2417,7 +2423,7 @@ function renderUploadBox() {
               ${shared.category === "otherDocuments" ? `<input type="text" class="staged-doc-name-input" data-index="${i}" value="${esc(p.docName || "")}" placeholder="Document name" style="width:170px;" ${state.busyUpload ? "disabled" : ""} />` : ""}
               <input type="date" class="staged-date-input" data-index="${i}" value="${esc(p.scheduledDate || "")}" style="width:150px;" ${state.busyUpload ? "disabled" : ""} />
               <button class="btn btn-tab btn-sm" data-action="schedule-staged-item" data-index="${i}" ${state.busyUpload ? "disabled" : ""}>📅 Schedule</button>
-              <button class="btn btn-dark btn-sm" data-action="submit-staged-item" data-index="${i}" ${state.busyUpload ? "disabled" : ""}>✅ Submit Now</button>
+              <button class="btn btn-dark btn-sm" data-action="submit-staged-item" data-index="${i}" ${state.busyUpload ? "disabled" : ""}>✅ Now</button>
               <button class="btn btn-danger btn-sm" data-action="cancel-staged-item" data-index="${i}" ${state.busyUpload ? "disabled" : ""}>🗑</button>
             </div>
           </div>
