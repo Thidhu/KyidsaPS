@@ -351,6 +351,46 @@ body.home-view main > .doc-section > .doc-section-head {
   border: 1px solid rgba(255,255,255,0.18);
   box-shadow: 0 20px 50px rgba(10,21,48,0.35);
 }
+/* Glowing announcement badge */
+.timetable-section .link-row.has-notice {
+  position: relative;
+  border: 1px solid rgba(224,147,44,0.55);
+  background: linear-gradient(135deg, rgba(164,131,39,0.18), rgba(224,147,44,0.12));
+  animation: noticeGlow 2.2s ease-in-out infinite;
+}
+.timetable-section .link-row.has-notice:hover {
+  animation-play-state: paused;
+}
+.timetable-section .link-row.has-notice::before {
+  content: "";
+  position: absolute; top: -5px; right: -5px;
+  width: 11px; height: 11px; border-radius: 50%;
+  background: #e0392c;
+  box-shadow: 0 0 0 0 rgba(224,57,44,0.75);
+  animation: noticeDot 1.7s ease-in-out infinite;
+}
+.notice-new-tag {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.04em;
+  background: #e0392c; color: #fff; padding: 2px 7px; border-radius: 10px;
+  margin-left: 6px; text-transform: uppercase; animation: noticeTagPulse 2.2s ease-in-out infinite;
+}
+@keyframes noticeGlow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(224,147,44,0.4), 0 2px 8px rgba(20,33,61,0.06); }
+  50%      { box-shadow: 0 0 16px 4px rgba(224,147,44,0.55), 0 2px 8px rgba(20,33,61,0.06); }
+}
+@keyframes noticeDot {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(224,57,44,0.75); }
+  50%      { box-shadow: 0 0 0 7px rgba(224,57,44,0); }
+}
+@keyframes noticeTagPulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.65; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .timetable-section .link-row.has-notice,
+  .timetable-section .link-row.has-notice::before,
+  .notice-new-tag { animation: none !important; }
+}
 
 .hero-logo {
   position: absolute; top: 0; left: 50%; transform: translate(-50%, -50%);
