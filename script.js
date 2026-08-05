@@ -1536,14 +1536,14 @@ function renderTimetableSection() {
   const isPrincipal = state.adminMode && !state.session;
   return `
     <div class="doc-section timetable-section" style="margin-top:22px;">
-      <div class="doc-section-head"><span>📅 Current Timetable</span></div>
+      <div class="doc-section-head"><span>📢 Important Notice/Announcement (Only for KPS Staff)</span></div>
       ${url
         ? `<a class="doc-row link-row" href="${esc(url)}" target="_blank" rel="noopener">
-             <span style="font-size:16px;">📅</span>
-             <span style="flex:1;">View the latest published timetable</span>
+             <span style="font-size:16px;">📢</span>
+             <span style="flex:1;">View the latest Announcement/Notice</span>
              <span style="color:#9aa2b1;">↗</span>
            </a>`
-        : `<div class="doc-empty">${isPrincipal ? "No timetable published yet — paste a link below once one's generated." : "No timetable has been published yet."}</div>`}
+        : `<div class="doc-empty">${isPrincipal ? "No announcement/notice published yet — paste a link below once one's generated." : "No announcement/notice has been published yet."}</div>`}
       ${isPrincipal ? `
         <div class="timetable-editor">
           <input type="text" id="timetable-url-input" placeholder="Paste the generated timetable link (Drive/image/PDF URL)" value="${esc(url || "")}" />
