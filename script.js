@@ -1530,7 +1530,6 @@ function renderOutOfStationBanner() {
     </div>
   `;
 }
-
 function renderTimetableSection() {
   const url = state.data.timetableUrl;
   const isPrincipal = state.adminMode && !state.session;
@@ -1538,9 +1537,9 @@ function renderTimetableSection() {
     <div class="doc-section timetable-section" style="margin-top:22px;">
       <div class="doc-section-head"><span>📢 Important Notice/Announcement (Only for KPS Staff)</span></div>
       ${url
-        ? `<a class="doc-row link-row" href="${esc(url)}" target="_blank" rel="noopener">
+        ? `<a class="doc-row link-row has-notice" href="${esc(url)}" target="_blank" rel="noopener">
              <span style="font-size:16px;">📢</span>
-             <span style="flex:1;">View the latest Announcement/Notice</span>
+             <span style="flex:1;">View the latest Announcement/Notice<span class="notice-new-tag">New</span></span>
              <span style="color:#9aa2b1;">↗</span>
            </a>`
         : `<div class="doc-empty">${isPrincipal ? "No announcement/notice published yet — paste a link below once one's generated." : "No announcement/notice has been published yet."}</div>`}
@@ -1616,7 +1615,7 @@ function renderHome() {
   return `
     <div class="hero-panel">
       <img class="hero-logo" src="${esc(LOGO_URL)}" alt="Kyidsa Primary School logo" onerror="this.style.display='none'" />
-      <h2 class="serif" style="font-size:24px; margin:0 0 6px;">Kyidsa Primary School Portal</h2>
+      <h2 class="serif" style="font-size:24px; margin:0 0 6px;">Digital Space - Kyidsa Primary School</h2>
       <div style="font-size:13.5px; color:#dfe4f0; margin-bottom:20px;">Everything the school needs, in one place.</div>
       <button class="btn btn-ghost" data-action="set-view" data-view="directory">👩‍🏫 Go to Teacher Directory</button>
     </div>
@@ -2861,7 +2860,7 @@ function runBootLoader() {
   const percentEl = document.getElementById("boot-percent");
   const barFill = document.getElementById("boot-bar-fill");
   if (!overlay) return;
-  const duration = 2000;
+  const duration = 1000;
   const start = performance.now();
   function tick(now) {
     const elapsed = now - start;
