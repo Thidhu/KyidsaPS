@@ -1,6 +1,6 @@
 // ---------- Constants ----------
 // PASTE YOUR APPS SCRIPT WEB APP URL HERE (from Deploy > New deployment)
-const BACKEND_URL = "https://script.google.com/macros/s/AKfycbzW44ioP3GYSIKZe9svvwHAM6vMFTC_FVzDvRMVolZy0YWTO1_n2_HzVvCw5VOkJr35/exec";
+const BACKEND_URL = "https://script.google.com/macros/s/AKfycbzmTXTfiw-4SGgLp4sRIqjXmfd5Ou8blimF01dtff7Jb05bRgWoWOL6jGTfSOCQRNbEcw/exec";
 
 // Put your welcome sound file (e.g. "audio/welcome.mp3") in your project folder,
 // then update this path if needed. If the file is missing, playback just silently
