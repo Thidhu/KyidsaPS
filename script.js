@@ -1,6 +1,6 @@
 // ---------- Constants ----------
 // PASTE YOUR APPS SCRIPT WEB APP URL HERE (from Deploy > New deployment)
-const BACKEND_URL = "https://script.google.com/macros/s/AKfycbx3yN_GQfVhbjFvjjAgWJA1m1ezZ3sQ6iFkgBPD3BZ9fUIwCcQPabcT09j2ZRxL2tQf9Q/exec";
+const BACKEND_URL = "https://script.google.com/macros/s/AKfycby46NWmuG5zhpea0Uh1iIMaqKb4_-5A9svDs7hclsTf2Wr1ekqfNOlpsautaGs2A_BOzg/exec";
 
 // Put your welcome sound file (e.g. "audio/welcome.mp3") in your project folder,
 // then update this path if needed. If the file is missing, playback just silently
@@ -54,7 +54,7 @@ const LEAVE_FORM_URL = "https://forms.gle/4PyP1VapqVohfvvG8";
 // since most external sites block being shown in an iframe.
 const TIMETABLE_GENERATOR_URL = "https://thinleywangchuk478.github.io/TIME-TABLE-GENERATOR/";
 const EMIS_URL = "https://portal.education.gov.bt/";
-const FACEBOOK_PAGE_URL = "https://www.facebook.com/kidsaprimaryschool/";
+const FACEBOOK_PAGE_URL = "https://www.facebook.com/people/Kyidsa-Primary-School-Samtse/61592482827385/";
 const SCHOOL_LOCATION_QUERY = "Kyidsa Primary School, Norbugang Gewog, Samtse Dzongkhag, Bhutan"; // used for the footer map — replace with exact coordinates (e.g. "27.xxxx,88.xxxx") if the name search isn't accurate enough
 const SCHOOL_INVENTORY_URL = "https://docs.google.com/spreadsheets/d/1j2vFFfvJw4yw3MFr8E1Qv3nwX_ngA2ZCRDN2jaP_Nds/edit?gid=0#gid=0"; // e.g. "https://docs.google.com/spreadsheets/d/xxxxx/edit"
 
@@ -74,6 +74,7 @@ function emptyData() {
     todRemarks: {},
     todRemarksSeen: {},
     timetableUrl: null,
+    lastNotifiedAt: null,
     customFolders: [],
     links: [],
     teacherPins: {},
@@ -546,6 +547,21 @@ function leaveCols(rows) {
   };
 }
 
+// Looks up a single leave row (name/start/end) by its stable ID — used right after
+// approving a leave, to say specifically who is now out of station and when,
+// rather than just a generic "Leave approved" toast.
+function findLeaveRowById(rows, id) {
+  if (!rows || rows.length === 0) return null;
+  const { tsCol, nameCol, startCol, endCol } = leaveCols(rows);
+  if (!nameCol) return null;
+  for (const row of rows) {
+    if (leaveRowId(row, tsCol, nameCol) === id) {
+      return { name: row[nameCol], start: startCol ? row[startCol] : "", end: endCol ? row[endCol] : "" };
+    }
+  }
+  return null;
+}
+
 // Approved leaves whose date range covers today (inclusive of both start & end dates).
 function getTeachersOnLeaveToday(leaveResponses, leaveStatuses, today) {
   if (!leaveResponses || leaveResponses.length === 0) return [];
@@ -749,6 +765,7 @@ function backendToState(raw) {
     leaveStatuses, leaveSeen,
     todRemarks, todRemarksSeen,
     timetableUrl: settings.timetableUrl || null,
+    lastNotifiedAt: settings.lastNotifiedAt || null,
     customFolders, links,
     teacherPins, staff,
     studentBreakdown,
@@ -1096,8 +1113,27 @@ async function setLeaveStatus(id, status) {
     if (prev === undefined) delete state.data.leaveStatuses[id]; else state.data.leaveStatuses[id] = prev;
     state.saveError = "Could not update leave status. Please try again.";
     render();
+    showToast("Failed to update leave status");
+    return;
   }
-  showToast(res && res.success ? `Leave ${status}` : "Failed to update leave status");
+
+  // Give a specific confirmation for approvals — who's out, and from when —
+  // rather than just "Leave approved", so the effect is obvious immediately
+  // (the same info also now shows live in the Out of Station banner above,
+  // both here on the Dashboard and on the Home page).
+  let msg = `Leave ${status}`;
+  if (status === "approved") {
+    const info = findLeaveRowById(state.data.leaveResponses, id);
+    if (info && info.start && info.end) {
+      const t = startOfDay(state.today);
+      const s = startOfDay(new Date(info.start));
+      const e = startOfDay(new Date(info.end));
+      const who = info.name || "Teacher";
+      if (t >= s && t <= e) msg = `✅ ${who} is now marked out of station`;
+      else if (s > t) msg = `✅ Leave approved — ${who} will be out of station from ${fmtDate(s)}`;
+    }
+  }
+  showToast(msg);
 }
 
 async function markLeaveSeen(id) {
@@ -1547,6 +1583,10 @@ function renderTimetableSection() {
         <div class="timetable-editor">
           <input type="text" id="timetable-url-input" placeholder="Paste the generated timetable link (Drive/image/PDF URL)" value="${esc(url || "")}" />
           <button class="btn btn-dark" data-action="save-timetable-url">Save</button>
+        </div>
+        <div class="timetable-notify-row">
+          <button class="btn btn-accent" data-action="notify-teachers" ${!url || state.busyNotify ? "disabled" : ""}>${state.busyNotify ? "Sending…" : "🔔 Notify Teachers"}</button>
+          <span class="notify-meta">${state.data.lastNotifiedAt ? `Last notified: ${fmtDate(state.data.lastNotifiedAt)}` : "Not sent yet"}</span>
         </div>
       ` : ""}
     </div>
@@ -2055,6 +2095,8 @@ function renderDashboard() {
       </div>
       <button class="btn" style="background:#E4DEC9; color:#4A3B22;" data-action="open-change-pin">Change Principal PIN</button>
     </div>
+
+    ${renderOutOfStationBanner()}
 
     <div class="schedule-grid">
       ${lessonPlanScheduleEditorHtml(state.data.schedules.lessonPlan)}
@@ -2950,6 +2992,34 @@ document.addEventListener("DOMContentLoaded", () => {
     if (action === "save-timetable-url") {
       const val = document.getElementById("timetable-url-input").value.trim();
       await saveTimetableUrl(val);
+      return;
+    }
+
+    if (action === "notify-teachers") {
+      const url = state.data.timetableUrl;
+      if (!url) { alert("Paste and save a notice link first."); return; }
+      if (!confirm("Send an email to every teacher who has an email on file, with a direct link to this notice?")) return;
+      // The direct "go straight to it" link teachers get is twofold: the notice
+      // itself (url), plus a link back to this portal — built from the page's own
+      // address so it always matches wherever it's actually hosted, no extra
+      // constant to configure.
+      const portalUrl = window.location.origin + window.location.pathname;
+      state.busyNotify = true;
+      render();
+      const res = await apiPost({ action: "notifyTeachers", url, portalUrl });
+      state.busyNotify = false;
+      if (res && res.success) {
+        state.data.lastNotifiedAt = new Date().toISOString();
+        let msg = `🔔 Notified ${res.sent} teacher${res.sent === 1 ? "" : "s"}`;
+        if (res.failed) msg += `, ${res.failed} failed`;
+        if (res.withoutEmail) msg += `, ${res.withoutEmail} have no email on file`;
+        render();
+        showToast(msg);
+      } else {
+        state.saveError = "Could not send notifications: " + (res && res.error ? res.error : "please try again.");
+        render();
+        showToast("Failed to notify teachers");
+      }
       return;
     }
 
