@@ -508,6 +508,11 @@ body.home-view main > .doc-section > .doc-section-head {
   border: 1px solid rgba(188,195,214,0.75); font-size: 13px; font-family: 'Inter', sans-serif;
 }
 
+.timetable-notify-row {
+  display: flex; align-items: center; gap: 10px; margin-top: 10px; flex-wrap: wrap;
+}
+.notify-meta { font-size: 12px; color: var(--c-ink-400); }
+
 .home-actions {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-top: 18px;
 }
