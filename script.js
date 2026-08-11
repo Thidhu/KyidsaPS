@@ -1,6 +1,6 @@
 // ---------- Constants ----------
 // PASTE YOUR APPS SCRIPT WEB APP URL HERE (from Deploy > New deployment)
-const BACKEND_URL = "https://script.google.com/macros/s/AKfycbzEB6rJPmTxe97rox764w9Rfa-y4vxVGLZqg8wiCsCRn8FtjrRfao6JX6828c5pi0mZug/exec";
+const BACKEND_URL = "https://script.google.com/macros/s/AKfycbzW44ioP3GYSIKZe9svvwHAM6vMFTC_FVzDvRMVolZy0YWTO1_n2_HzVvCw5VOkJr35/exec";
 
 // Put your welcome sound file (e.g. "audio/welcome.mp3") in your project folder,
 // then update this path if needed. If the file is missing, playback just silently
@@ -985,7 +985,7 @@ async function addDocument(doc) {
     });
     state.saveError = "";
   } else {
-    state.saveError = "Could not upload. Please check your connection and try again.";
+    state.saveError = "Could not upload: " + (res && res.error ? res.error : "please check your connection and try again.");
   }
   render();
   showToast(res && res.success ? "Document uploaded" : "Upload failed");
