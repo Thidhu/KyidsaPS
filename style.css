@@ -170,7 +170,10 @@ th { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: 
   overflow: hidden; text-overflow: ellipsis;
 }
 .dash-table-wrap th.col-content, .dash-table-wrap td.col-content {
-  white-space: normal; word-break: break-word; min-width: 220px; max-width: 480px;
+  white-space: normal; word-break: break-word; min-width: 340px; max-width: 640px;
+}
+.dash-table-wrap th.col-narrow, .dash-table-wrap td.col-narrow {
+  white-space: normal; word-break: break-word; min-width: 140px; max-width: 200px;
 }
 
 /* Custom slim scrollbar for the horizontally-scrolling table wrapper */
