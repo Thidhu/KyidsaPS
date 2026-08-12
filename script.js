@@ -1,6 +1,6 @@
 // ---------- Constants ----------
 // PASTE YOUR APPS SCRIPT WEB APP URL HERE (from Deploy > New deployment)
-const BACKEND_URL = "https://script.google.com/macros/s/AKfycbwYOnz0486ZFL3nNsuMB_NgCdGXOKnS23_xK81rTKoav9xE4VOTIdIe1AClnJaayeqGMA/exec";
+const BACKEND_URL = "https://script.google.com/macros/s/AKfycbzmTXTfiw-4SGgLp4sRIqjXmfd5Ou8blimF01dtff7Jb05bRgWoWOL6jGTfSOCQRNbEcw/exec";
 
 // Put your welcome sound file (e.g. "audio/welcome.mp3") in your project folder,
 // then update this path if needed. If the file is missing, playback just silently
@@ -74,7 +74,6 @@ function emptyData() {
     leaveResponses: [],
     todRemarks: {},
     todRemarksSeen: {},
-    todFollowUps: {},
     timetableUrl: null,
     lastNotifiedAt: null,
     adminNotifyEmail: null,
@@ -722,7 +721,6 @@ function backendToState(raw) {
   const leaveSeen = {};
   const todRemarks = {};
   const todRemarksSeen = {};
-  const todFollowUps = {};
   const teacherPins = {};
   Object.keys(settings).forEach((k) => {
     if (k.startsWith("override_") && settings[k]) {
@@ -737,8 +735,6 @@ function backendToState(raw) {
       leaveSeen[k.slice("leave_seen_".length)] = settings[k];
     } else if (k.startsWith("tod_remark_seen_")) {
       todRemarksSeen[k.slice("tod_remark_seen_".length)] = settings[k];
-    } else if (k.startsWith("tod_followup_")) {
-      todFollowUps[k.slice("tod_followup_".length)] = settings[k];
     } else if (k.startsWith("tod_remark_")) {
       todRemarks[k.slice("tod_remark_".length)] = settings[k];
     } else if (k.startsWith("teacher_pin_")) {
@@ -772,7 +768,7 @@ function backendToState(raw) {
     todResponses: raw.todResponses || [],
     leaveResponses: raw.leaveResponses || [],
     leaveStatuses, leaveSeen,
-    todRemarks, todRemarksSeen, todFollowUps,
+    todRemarks, todRemarksSeen,
     timetableUrl: settings.timetableUrl || null,
     lastNotifiedAt: settings.lastNotifiedAt || null,
     adminNotifyEmail: settings.adminNotifyEmail || null,
@@ -1180,24 +1176,6 @@ async function markTodRemarkSeen(id) {
   const key = `tod_remark_seen_${id}`;
   const res = await apiPost({ action: "setSetting", key, value: "true" });
   if (res && res.success) state.data.todRemarksSeen[id] = "true";
-}
-
-// Follow-up notes are separate from the Principal's Remark: any logged-in teacher
-// can write/edit these (not just the Principal), so whoever's on duty can leave
-// something for the next TOD to pick up and act on.
-async function saveTodFollowUp(id, text) {
-  const key = `tod_followup_${id}`;
-  const prev = state.data.todFollowUps[id];
-  state.data.todFollowUps[id] = text;
-  state.saveError = "";
-  render();
-  const res = await apiPost({ action: "setSetting", key, value: text });
-  if (!(res && res.success)) {
-    state.data.todFollowUps[id] = prev || "";
-    state.saveError = "Could not save follow-up. Please try again.";
-    render();
-  }
-  showToast(res && res.success ? "Follow-up saved" : "Failed to save follow-up");
 }
 
 async function saveAdminNotifyEmail(email) {
@@ -2061,10 +2039,8 @@ function renderLeaveTable(allRows, leaveStatuses) {
   `;
 }
 
-function renderTodReportsTable(rows, todRemarks, todFollowUps, opts) {
+function renderTodReportsTable(rows, todRemarks, opts) {
   const canEditRemark = !!(opts && opts.canEditRemark);
-  const canEditFollowUp = !!(opts && opts.canEditFollowUp);
-  todFollowUps = todFollowUps || {};
 
   if (!rows || rows.length === 0) {
     return `
@@ -2099,16 +2075,24 @@ function renderTodReportsTable(rows, todRemarks, todFollowUps, opts) {
           <thead><tr>
             ${cols.map((c) => `<th class="${tableColumnClass(c)}" title="${esc(c)}">${esc(c)}</th>`).join("")}
             <th class="col-narrow">Principal's Remark</th>
-            <th>Follow Up</th>
           </tr></thead>
           <tbody>
             ${shown.map((r) => {
               const id = todRowId(r, tsCol, nameCol);
               return `
                 <tr>
-                  ${cols.map((c) => `<td class="${tableColumnClass(c)}">${esc(r[c] ?? "")}</td>`).join("")}
+                  ${cols.map((c) => {
+                    const val = r[c] ?? "";
+                    // The TOD form's own "Follow Up" question (however it's worded)
+                    // is highlighted the same way a handover note should stand out —
+                    // no separate editable column needed anymore, since it's captured
+                    // right at submission time instead of added on afterward.
+                    if (/follow.?up/i.test(c) && val) {
+                      return `<td class="${tableColumnClass(c)}"><div class="comment-display" style="margin-top:0; background:rgba(28,116,232,0.10); border-left-color:var(--c-primary-600);">👉 ${esc(val)}</div></td>`;
+                    }
+                    return `<td class="${tableColumnClass(c)}">${esc(val)}</td>`;
+                  }).join("")}
                   <td class="col-narrow">${todRemarkEditorHtml(id, todRemarks[id] || "", canEditRemark)}</td>
-                  <td style="white-space:normal; min-width:220px;">${todFollowUpEditorHtml(id, todFollowUps[id] || "", canEditFollowUp)}</td>
                 </tr>
               `;
             }).join("")}
@@ -2132,28 +2116,6 @@ function todRemarkEditorHtml(id, currentRemark, editable) {
           <div style="display:flex; gap:6px; margin-top:6px;">
             <button class="btn btn-dark" data-action="save-tod-remark" data-id="${id}">Save</button>
             <button class="modal-close" data-action="toggle-tod-remark" data-id="${id}">✕</button>
-          </div>
-        </div>
-      ` : ""}
-    </div>
-  `;
-}
-
-// Follow-up notes: unlike the Principal's Remark, any logged-in teacher can add or
-// edit these — this is the handover note for "the next TOD" to see and act on.
-function todFollowUpEditorHtml(id, currentFollowUp, editable) {
-  return `
-    <div class="comment-wrap" data-tod-followup="${id}">
-      ${currentFollowUp ? `<div class="comment-display" style="margin-top:0; background:rgba(28,116,232,0.10); border-left-color:var(--c-primary-600);">👉 ${esc(currentFollowUp)}</div>` : (editable ? "" : `<span style="font-size:12px; color:var(--c-ink-300);">—</span>`)}
-      ${editable ? `
-        <button class="override-btn" data-action="toggle-tod-followup" data-id="${id}">
-          👉 ${currentFollowUp ? "Edit follow-up" : "Add follow-up"}
-        </button>
-        <div class="comment-edit" style="display:none;">
-          <textarea data-role="tod-followup-text" rows="2" placeholder="What should the next TOD do or check?">${esc(currentFollowUp || "")}</textarea>
-          <div style="display:flex; gap:6px; margin-top:6px;">
-            <button class="btn btn-dark" data-action="save-tod-followup" data-id="${id}">Save</button>
-            <button class="modal-close" data-action="toggle-tod-followup" data-id="${id}">✕</button>
           </div>
         </div>
       ` : ""}
@@ -2207,7 +2169,7 @@ function renderDashboard() {
 
     ${renderAttendanceSummary(attendanceToday)}
     ${renderResponseTable("Attendance — Today", "📋", attendanceToday.todayRows, "No attendance submitted yet today.", "attendance")}
-    ${renderTodReportsTable(data.todResponses, data.todRemarks, data.todFollowUps, { canEditRemark: true, canEditFollowUp: true })}
+    ${renderTodReportsTable(data.todResponses, data.todRemarks, { canEditRemark: true })}
     ${renderLeaveTable(data.leaveResponses, data.leaveStatuses)}
   `;
 }
@@ -2489,19 +2451,19 @@ function renderTeacherLinksSection(teacher, isPrincipal, canUpload) {
 
 // Standalone TOD Reports view — reachable by any logged-in teacher (via the
 // action card in their folder) as well as the Principal, so "the next TOD" can
-// see every report and its Follow Up column, not just their own. The Principal's
-// Remark stays admin-editable only; Follow Up is editable by anyone logged in.
+// see every report, including whatever follow-up note was written directly on
+// the TOD Report form itself (highlighted automatically — see renderTodReportsTable).
+// The Principal's Remark stays admin-editable only.
 function renderTodReportsPage() {
   const isPrincipal = state.adminMode && !state.session;
-  const canEditFollowUp = !!state.session || isPrincipal;
   const backView = state.session ? "folder" : "dashboard";
   return `
     <button class="btn btn-plain" data-action="set-view" data-view="${backView}">⬅ Back</button>
     <div class="section-head">
       <h2 class="serif" style="font-size:20px; margin:0; color:#4A3B22;">Day's Activity (TOD) Reports</h2>
     </div>
-    <div class="dash-sub" style="margin-top:-8px; margin-bottom:18px;">Every submitted report, visible to all staff — use Follow Up to hand off anything the next TOD should check or continue.</div>
-    ${renderTodReportsTable(state.data.todResponses, state.data.todRemarks, state.data.todFollowUps, { canEditRemark: isPrincipal, canEditFollowUp })}
+    <div class="dash-sub" style="margin-top:-8px; margin-bottom:18px;">Every submitted report, visible to all staff — including any follow-up notes written right on the TOD form for the next TOD to pick up.</div>
+    ${renderTodReportsTable(state.data.todResponses, state.data.todRemarks, { canEditRemark: isPrincipal })}
   `;
 }
 
@@ -3364,18 +3326,6 @@ document.addEventListener("DOMContentLoaded", () => {
       const wrap = el.closest(".comment-wrap");
       const text = wrap.querySelector("[data-role='tod-remark-text']").value.trim();
       await saveTodRemark(el.dataset.id, text);
-      return;
-    }
-    if (action === "toggle-tod-followup") {
-      const wrap = el.closest(".comment-wrap");
-      const editRow = wrap.querySelector(".comment-edit");
-      editRow.style.display = editRow.style.display === "none" ? "block" : "none";
-      return;
-    }
-    if (action === "save-tod-followup") {
-      const wrap = el.closest(".comment-wrap");
-      const text = wrap.querySelector("[data-role='tod-followup-text']").value.trim();
-      await saveTodFollowUp(el.dataset.id, text);
       return;
     }
     if (action === "save-admin-notify-email") {
