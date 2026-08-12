@@ -2473,7 +2473,7 @@ function renderTeacherServicesSection() {
       <button class="action-card" data-action="open-form" data-url="${esc(ATTENDANCE_FORM_URL)}" data-title="Attendance">
         <span class="action-icon">📋</span>
         <span class="action-label">Mark Attendance</span>
-        <span class="action-sub">Daily class attendance form</span>
+        <span class="action-sub">Head Counting for Lunch Ration</span>
       </button>
       <button class="action-card" data-action="open-form" data-url="${esc(TOD_FORM_URL)}" data-title="TOD Report">
         <span class="action-icon">📝</span>
@@ -2487,7 +2487,7 @@ function renderTeacherServicesSection() {
       </button>
       <button class="action-card" data-action="set-view" data-view="todReports">
         <span class="action-icon">📖</span>
-        <span class="action-label">TOD Reports</span>
+        <span class="action-label">TOD Reports<br>&<br> Follow-ups</span>
         <span class="action-sub">View all reports &amp; follow-ups</span>
       </button>
     </div>
