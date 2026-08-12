@@ -1,6 +1,6 @@
 // ---------- Constants ----------
 // PASTE YOUR APPS SCRIPT WEB APP URL HERE (from Deploy > New deployment)
-const BACKEND_URL = "https://script.google.com/macros/s/AKfycbzbEGkSonp2Y_DZbrinosd0qV66QbiKsjjbJ_svR70yFh-oCUibeFqKZU7QcN7Us24FTQ/exec";
+const BACKEND_URL = "https://script.google.com/macros/s/AKfycbzmTXTfiw-4SGgLp4sRIqjXmfd5Ou8blimF01dtff7Jb05bRgWoWOL6jGTfSOCQRNbEcw/exec";
 
 // Put your welcome sound file (e.g. "audio/welcome.mp3") in your project folder,
 // then update this path if needed. If the file is missing, playback just silently
@@ -30,7 +30,8 @@ function selectOptionsHtml(options, currentValue) {
 // "Day" e.g. a day-of-week answer) — deliberately does NOT match "Day's Activity"
 // or similar free-text columns, which need room to actually show what was written.
 function tableColumnClass(header) {
-  if (/^timestamp$|^day$/i.test(header)) return "col-compact";
+  if (/^timestamp$/i.test(header)) return "col-compact";
+  if (/^\s*\d*\.?\s*day\s*$/i.test(header)) return "col-compact";
   if (/name/i.test(header)) return "col-name";
   return "col-content";
 }
@@ -547,6 +548,7 @@ function leaveCols(rows) {
     startCol: findColumnKey(rows, /start/i),
     endCol: findColumnKey(rows, /end/i),
     reasonCol: findColumnKey(rows, /reason/i),
+    typeCol: findColumnKey(rows, /type/i),
   };
 }
 
@@ -589,7 +591,7 @@ function getTeachersOnLeaveToday(leaveResponses, leaveStatuses, today) {
 // own folder page (unlike getTeacherLeaveNotices, this doesn't disappear once "seen").
 function getTeacherLeaveRequests(teacher, leaveResponses, leaveStatuses) {
   if (!teacher || !leaveResponses || leaveResponses.length === 0) return [];
-  const { tsCol, nameCol, startCol, endCol, reasonCol } = leaveCols(leaveResponses);
+  const { tsCol, nameCol, startCol, endCol, reasonCol, typeCol } = leaveCols(leaveResponses);
   if (!nameCol) return [];
   const teacherName = String(teacher.name || "").trim().toLowerCase();
   return leaveResponses
@@ -602,6 +604,7 @@ function getTeacherLeaveRequests(teacher, leaveResponses, leaveStatuses) {
         start: startCol ? row[startCol] : "",
         end: endCol ? row[endCol] : "",
         reason: reasonCol ? row[reasonCol] : "",
+        type: typeCol ? row[typeCol] : "",
         submittedAt: tsCol ? row[tsCol] : "",
       };
     })
@@ -2009,7 +2012,7 @@ function renderLeaveTable(allRows, leaveStatuses) {
     `;
   }
 
-  const { tsCol, nameCol, startCol, endCol, reasonCol } = leaveCols(rows);
+  const { tsCol, nameCol, startCol, endCol, reasonCol, typeCol } = leaveCols(rows);
   const sorted = tsCol
     ? [...rows].sort((a, b) => (parseSheetTimestamp(b[tsCol]) || 0) - (parseSheetTimestamp(a[tsCol]) || 0))
     : [...rows].reverse();
@@ -2027,6 +2030,7 @@ function renderLeaveTable(allRows, leaveStatuses) {
             <th class="col-compact">Submitted</th>
             <th>Teacher</th>
             <th>Leave Dates</th>
+            ${typeCol ? `<th class="col-compact">Type</th>` : ""}
             <th>Reason</th>
             <th>Status</th>
             <th></th>
@@ -2040,6 +2044,7 @@ function renderLeaveTable(allRows, leaveStatuses) {
                   <td class="col-compact">${esc(tsCol ? row[tsCol] : "")}</td>
                   <td style="font-weight:600;">${esc(nameCol ? row[nameCol] : "")}</td>
                   <td>${startCol && endCol ? `${fmtDate(row[startCol])} &ndash; ${fmtDate(row[endCol])}` : "—"}</td>
+                  ${typeCol ? `<td class="col-compact">${esc(row[typeCol] || "")}</td>` : ""}
                   <td>${esc(reasonCol ? row[reasonCol] : "")}</td>
                   <td>${leaveStatusPillHtml(status)}</td>
                   <td style="white-space:nowrap;">
@@ -2093,7 +2098,7 @@ function renderTodReportsTable(rows, todRemarks, todFollowUps, opts) {
         <table>
           <thead><tr>
             ${cols.map((c) => `<th class="${tableColumnClass(c)}" title="${esc(c)}">${esc(c)}</th>`).join("")}
-            <th>Principal's Remark</th>
+            <th class="col-narrow">Principal's Remark</th>
             <th>Follow Up</th>
           </tr></thead>
           <tbody>
@@ -2102,7 +2107,7 @@ function renderTodReportsTable(rows, todRemarks, todFollowUps, opts) {
               return `
                 <tr>
                   ${cols.map((c) => `<td class="${tableColumnClass(c)}">${esc(r[c] ?? "")}</td>`).join("")}
-                  <td style="white-space:normal; min-width:220px;">${todRemarkEditorHtml(id, todRemarks[id] || "", canEditRemark)}</td>
+                  <td class="col-narrow">${todRemarkEditorHtml(id, todRemarks[id] || "", canEditRemark)}</td>
                   <td style="white-space:normal; min-width:220px;">${todFollowUpEditorHtml(id, todFollowUps[id] || "", canEditFollowUp)}</td>
                 </tr>
               `;
@@ -2390,6 +2395,7 @@ function renderTeacherLeaveSection(teacher) {
         <div class="doc-item">
           <div class="doc-row" style="gap:10px; flex-wrap:wrap;">
             <span style="flex:1; font-weight:600;">${r.start && r.end ? `${fmtDate(r.start)} &ndash; ${fmtDate(r.end)}` : "—"}</span>
+            ${r.type ? `<span class="pill" style="background:rgba(28,116,232,0.10); color:var(--c-primary-900);">${esc(r.type)}</span>` : ""}
             ${leaveStatusPillHtml(r.status)}
           </div>
           ${r.reason ? `<div class="doc-meta">${esc(r.reason)}</div>` : ""}
@@ -2431,7 +2437,7 @@ function renderTeacherDriveSection(teacher, isPrincipal, canUpload) {
       ${breadcrumbHtml}
       ${currentUrl ? `
         <a href="${esc(currentUrl)}" target="_blank" rel="noopener" class="doc-row link-row" style="margin-bottom:12px;">
-          <span>📁 Open "${esc(currentLabel)}" in Drive — work directly in Docs &amp; Sheets</span>
+          <span>📁 Open "${esc(currentLabel)}" in Drive — view or download files</span>
         </a>
       ` : `<div class="doc-empty">Drive folder link isn't available yet — it's created the first time a document is uploaded.</div>`}
 
