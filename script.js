@@ -659,6 +659,27 @@ function getUnseenTodRemarks(teacher, todResponses, todRemarks, todRemarksSeen) 
   return getTeacherTodRemarks(teacher, todResponses, todRemarks).filter((r) => todRemarksSeen[r.id] !== "true");
 }
 
+// ---------- Today's TOD follow-up (surfaced on Home so the next TOD sees it
+// immediately, without having to open the full TOD Reports table) ----------
+// The TOD form's own "Follow Up" question — however it's worded — is matched by
+// keyword, same as everywhere else this column is found.
+function findFollowUpColumn(rows) {
+  return findColumnKey(rows, /follow.?up/i);
+}
+
+// Only today's TOD Report row(s) with a non-empty Follow Up answer — written by
+// whoever was TOD today, for whoever is TOD next.
+function getTodaysFollowUps(todResponses, today) {
+  if (!todResponses || todResponses.length === 0) return [];
+  const { tsCol, nameCol } = todCols(todResponses);
+  const followUpCol = findFollowUpColumn(todResponses);
+  if (!tsCol || !followUpCol) return [];
+  return todResponses
+    .filter((r) => isSameLocalDay(parseSheetTimestamp(r[tsCol]), today) && String(r[followUpCol] || "").trim())
+    .map((r) => ({ name: nameCol ? r[nameCol] : "", time: r[tsCol], note: r[followUpCol] }))
+    .sort((a, b) => (parseSheetTimestamp(b.time) || 0) - (parseSheetTimestamp(a.time) || 0));
+}
+
 
 async function apiGet() {
   try {
@@ -1667,6 +1688,43 @@ function renderFacebookSection() {
   `;
 }
 
+// A single quick-access card so anyone landing on Home can mark attendance right
+// away — no need to log in as a teacher and dig into their folder first. Opens
+// the same embedded form as the one inside a teacher's folder.
+function renderHomeAttendanceAction() {
+  return `
+    <div class="home-actions" style="margin-bottom:20px;">
+      <button class="action-card" data-action="open-form" data-url="${esc(ATTENDANCE_FORM_URL)}" data-title="Attendance">
+        <span class="action-icon">📋</span>
+        <span class="action-label">Mark Attendance</span>
+        <span class="action-sub">Head Counting for Lunch Ration</span>
+      </button>
+    </div>
+  `;
+}
+
+// Shows only today's Follow Up note(s) from the TOD Report form — written by
+// today's TOD, meant for the next TOD — right on Home where it's impossible to
+// miss. Once a new day starts and a fresh TOD report is submitted, this section
+// naturally updates to show that day's note instead. Visible to everyone (no
+// login needed), same as the rest of Home.
+function renderTodayFollowUpSection() {
+  const items = getTodaysFollowUps(state.data.todResponses, state.today);
+  if (items.length === 0) return "";
+  return `
+    <div class="doc-section" style="margin-top:22px; border-left:4px solid var(--c-primary-600, #1c74e8); background:rgba(28,116,232,0.06);">
+      <div class="doc-section-head"><span>👉 Today's Follow-up (from TOD)</span></div>
+      ${items.map((it) => `
+        <div class="doc-item">
+          <div class="comment-display" style="margin-top:0; background:rgba(28,116,232,0.10); border-left-color:var(--c-primary-600);">
+            ${it.name ? `<strong>${esc(it.name)}</strong> — ` : ""}${esc(it.note)}
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
 function renderHome() {
   const isPrincipal = state.adminMode && !state.session;
   const importantLinks = [
@@ -1683,6 +1741,10 @@ function renderHome() {
     </div>
 
     ${renderOutOfStationBanner()}
+
+    ${renderTodayFollowUpSection()}
+
+    ${renderHomeAttendanceAction()}
 
     ${renderSchoolStatsSection(isPrincipal)}
     ${renderStaffProfileNavCard()}
@@ -2041,12 +2103,14 @@ function renderLeaveTable(allRows, leaveStatuses) {
 
 function renderTodReportsTable(rows, todRemarks, opts) {
   const canEditRemark = !!(opts && opts.canEditRemark);
+  const rangeLabel = (opts && opts.rangeLabel) || "";
+  const emptyMessage = (opts && opts.emptyMessage) || "No responses yet. Once the linked Google Form receives submissions, they'll show up here.";
 
   if (!rows || rows.length === 0) {
     return `
       <div class="doc-section" style="margin-top:22px;">
         <div class="doc-section-head"><span>📝 Day's Activity (TOD Reports)</span></div>
-        <div class="doc-empty">No responses yet. Once the linked Google Form receives submissions, they'll show up here.</div>
+        <div class="doc-empty">${esc(emptyMessage)}</div>
       </div>
     `;
   }
@@ -2064,7 +2128,7 @@ function renderTodReportsTable(rows, todRemarks, opts) {
     <div class="doc-section" style="margin-top:22px;">
       <div class="doc-section-head">
         <span>📝 Day's Activity (TOD Reports)</span>
-        <span class="count">(${rows.length}${rows.length > 100 ? " — showing latest 100" : ""})</span>
+        <span class="count">(${rows.length}${rows.length > 100 ? " — showing latest 100" : ""}${rangeLabel})</span>
         <div style="display:flex; gap:6px; margin-left:auto;">
           <button class="btn btn-tab btn-sm" data-action="export-csv" data-source="tod">⬇️ CSV</button>
           <button class="btn btn-tab btn-sm" data-action="print-table" data-source="tod">🖨️ Print</button>
@@ -2127,6 +2191,12 @@ function todRemarkEditorHtml(id, currentRemark, editable) {
 function renderDashboard() {
   const data = state.data;
   const attendanceToday = getTodaysAttendance(data.attendanceResponses, state.today);
+
+  // TOD reports on this dashboard are trimmed to the last 3 days — the full history
+  // stays available on the standalone "TOD Reports & Follow-ups" page (renderTodReportsPage).
+  const { tsCol: todTsCol } = todCols(data.todResponses);
+  const todRecent = filterToLastNDays(data.todResponses, todTsCol, state.today, 3);
+
   const rows = data.teachers.map((t) => {
     const lp = getStatus(data, t.id, "lessonPlan", state.today);
     const od = getStatus(data, t.id, "otherDocuments", state.today);
@@ -2151,6 +2221,8 @@ function renderDashboard() {
 
     ${renderOutOfStationBanner()}
 
+    ${renderLeaveTable(data.leaveResponses, data.leaveStatuses)}
+
     <div class="schedule-grid">
       ${lessonPlanScheduleEditorHtml(state.data.schedules.lessonPlan)}
       ${otherDocumentsCalendarEditorHtml(state.data.schedules.otherDocuments)}
@@ -2169,8 +2241,11 @@ function renderDashboard() {
 
     ${renderAttendanceSummary(attendanceToday)}
     ${renderResponseTable("Attendance — Today", "📋", attendanceToday.todayRows, "No attendance submitted yet today.", "attendance")}
-    ${renderTodReportsTable(data.todResponses, data.todRemarks, { canEditRemark: true })}
-    ${renderLeaveTable(data.leaveResponses, data.leaveStatuses)}
+    ${renderTodReportsTable(todRecent, data.todRemarks, {
+      canEditRemark: true,
+      rangeLabel: " in the last 3 days",
+      emptyMessage: "No Day's Activity (TOD) reports in the last 3 days. Use CSV/Print above, or open \"TOD Reports & Follow-ups\" from a teacher's folder for full history.",
+    })}
   `;
 }
 
@@ -2453,7 +2528,8 @@ function renderTeacherLinksSection(teacher, isPrincipal, canUpload) {
 // action card in their folder) as well as the Principal, so "the next TOD" can
 // see every report, including whatever follow-up note was written directly on
 // the TOD Report form itself (highlighted automatically — see renderTodReportsTable).
-// The Principal's Remark stays admin-editable only.
+// The Principal's Remark stays admin-editable only. Unlike the dashboard's copy,
+// this page always shows the FULL history, not just the last 3 days.
 function renderTodReportsPage() {
   const isPrincipal = state.adminMode && !state.session;
   const backView = state.session ? "folder" : "dashboard";
